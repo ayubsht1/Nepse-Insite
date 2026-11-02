@@ -19,29 +19,26 @@ created with `python manage.py seed` and is explicitly labeled as fabricated.
 
 ## Requirements and local setup
 
-Use Node.js 20.9+, npm, Python 3.12+, and Docker Desktop with Compose. In
-PowerShell at the repository root:
+Use Docker Desktop with Compose for the complete local stack. In PowerShell at
+the repository root:
 
 ```powershell
 Copy-Item .env.example .env
-Copy-Item backend\.env.example backend\.env
-Copy-Item frontend\.env.example frontend\.env.local
-docker compose up -d
-python -m venv backend\.venv
-.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-.\backend\.venv\Scripts\python.exe backend\manage.py migrate
+docker compose up --build -d
+docker compose ps
 ```
 
-Set `DJANGO_SETTINGS_MODULE=config.settings.development` when running Django
-commands from the repository root, or run them from `backend\` as shown below.
-Create the trusted initial Django administrator interactively; no credentials
-are preconfigured:
+Compose starts PostgreSQL, Redis, the Django/Daphne API, the Next.js frontend,
+two Celery workers, and one Celery Beat scheduler. The backend applies
+migrations before starting. The root `.env` controls development database
+credentials and frontend/backend build URLs; `.env.example` contains local-only
+defaults. Change the Django key and database password before exposing this
+stack beyond a trusted development machine.
+
+Create the trusted initial Django administrator interactively:
 
 ```powershell
-Push-Location backend
-.\.venv\Scripts\python.exe manage.py createsuperuser
-.\.venv\Scripts\python.exe manage.py runserver
-Pop-Location
+docker compose exec backend python manage.py createsuperuser
 ```
 
 The new superuser has Django `is_staff`/`is_superuser` privileges for Django
@@ -49,12 +46,15 @@ Admin and automatically receives an independent `Admin` application role.
 Public registrations remain `Viewer`; the application role is stored on the
 user profile.
 
+Open <http://localhost:3000> for the frontend, <http://localhost:8000/admin/>
+for Django Admin, and <http://localhost:8000/api/docs/> for API documentation.
+View service status and logs with `docker compose ps` and
+`docker compose logs -f backend celery-worker-1 celery-worker-2 celery-beat`.
+
 To populate a development database with clearly marked demonstration records:
 
 ```powershell
-Push-Location backend
-.\.venv\Scripts\python.exe manage.py seed
-Pop-Location
+docker compose exec backend python manage.py seed
 ```
 
 The command is disabled when `DEBUG=False`, is repeatable without changing
@@ -66,44 +66,32 @@ superuser. Optionally pass `--password` to set a validated password on newly
 created demo accounts only. These records are for UI/development testing and
 must not be treated as real market or publisher data.
 
-Run Celery worker and Beat from `backend\` in separate terminals:
+Run a one-off crawler dispatch from the backend container after an administrator
+has reviewed publisher terms, robots.txt, contact details, and enabled a source:
 
 ```powershell
-.\.venv\Scripts\celery.exe -A config worker --pool=solo --loglevel=info
-.\.venv\Scripts\celery.exe -A config beat --loglevel=info
+docker compose exec backend python manage.py shell -c "from apps.crawlers.tasks import crawl_enabled_sources; crawl_enabled_sources.delay()"
 ```
 
-For authenticated WebSockets, serve `config.asgi:application` with Daphne:
+For frontend/backend development directly on the host instead of inside
+Compose, install Node.js 20.9+ and Python 3.12+, copy the respective example
+environment files, and use the native setup steps in [backend/README.md](./backend/README.md).
 
-```powershell
-.\.venv\Scripts\daphne.exe -b 127.0.0.1 -p 8000 config.asgi:application
-```
-
-Start the frontend in another terminal:
-
-```powershell
-Set-Location frontend
-npm.cmd install
-npm.cmd run dev
-```
-
-Open <http://localhost:3000>. Dashboard pages require authentication. Public
-registration is at `/register` and always grants Viewer. Protected routes are
-`/dashboard`, `/analyst`, and `/admin`.
+Dashboard pages require authentication. Public registration is at `/register`
+and always grants Viewer. Protected routes are `/dashboard`, `/analyst`, and
+`/admin`.
 
 ## Environment variables
 
 | File / variable | Purpose |
 |---|---|
-| `.env` · `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Local Compose database only. Use non-default values outside development. |
-| `backend\.env` · `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` | Django security and host configuration. Set a unique secret and `DEBUG=False` in production. |
-| `backend\.env` · `DATABASE_URL` | PostgreSQL/Supabase URL; require TLS for hosted databases. SQLite is only a local fallback. |
-| `backend\.env` · `REDIS_URL` | Channels Redis URL. |
-| `backend\.env` · `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Celery Redis URLs. |
-| `backend\.env` · `FRONTEND_URL` | CORS and CSRF trusted frontend origin. |
-| `backend\.env` · `CRAWLER_USER_AGENT` | Identifiable crawler contact string; configure before enabling sources. |
-| `frontend\.env.local` · `NEXT_PUBLIC_API_URL` | Django REST base URL, e.g. `http://localhost:8000/api`. |
-| `frontend\.env.local` · `NEXT_PUBLIC_WS_URL` | WebSocket URL, e.g. `ws://localhost:8000/ws/updates/`. |
+| `.env` · `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Compose development database settings. |
+| `.env` · `DJANGO_SECRET_KEY`, `DJANGO_DEBUG` | Compose development Django settings. Never use the example key outside local development. |
+| `.env` · `CRAWLER_USER_AGENT` | Identifiable crawler contact string; replace with a real contact before enabling a publisher. |
+| `.env` · `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL` | Frontend API and WebSocket URLs; these are baked into the frontend image at build time. |
+| `backend\.env` · `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` | Native backend run settings. Use a unique secret and `DEBUG=False` in production. |
+| `backend\.env` · `DATABASE_URL`, `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Native backend database and Redis URLs. |
+| `backend\.env` · `FRONTEND_URL` | Native backend CORS and CSRF trusted frontend origin. |
 
 Never commit `.env`, `.env.local`, credentials, or production secrets.
 
@@ -132,15 +120,16 @@ market calculation methodology.
 
 ## Data collection and limitations
 
-All four news sources remain **disabled** by default. Current page inspection
-provided candidate listing paths for Merolagani, ShareSansar, and Bizmandu;
-NEPSE Alpha has no configured listing because its homepage is app-rendered and
-restricted paths are not a news API. These are configuration candidates, not
-proof that a crawl succeeds. The crawler records empty discovery/parsing as a
-failed run and avoids retrying permanent HTTP 4xx responses (except 429).
+The database migration registers all four requested source URLs and article
+patterns, with NEPSE Alpha's page-number template. All sources remain
+**disabled** by default. These requested settings are configuration, not
+confirmation that a publisher permits crawling or that selectors still work.
 Verify publisher terms and current `robots.txt` before enabling any source.
-No live crawl or article persistence was verified during this work. OHLCV and
-floorsheet records must otherwise come from a verified/licensed source.
+The crawler checks robots rules on listing/article URLs, enforces same-site
+links/redirects, rate-limits requests, and reports empty discovery/parsing as a
+failed run. It does not bypass access controls. No live crawl or article
+persistence is claimed. OHLCV and floorsheet records must otherwise come from a
+verified/licensed source.
 Consequently, market calculations on demo records are explicitly fictional;
 production analysis remains unavailable until sourced records exist. The
 pressure value is only an OHLCV close-location estimate, not actual buy/sell
@@ -177,10 +166,9 @@ database; seeded data must not be used as real market information.
 
 ## Production deployment
 
-Use a unique strong Django secret, `DEBUG=False`, explicit `ALLOWED_HOSTS`,
+The included Compose stack is for development, not production. Production
+requires a unique strong Django secret, `DEBUG=False`, explicit `ALLOWED_HOSTS`,
 TLS-enabled PostgreSQL and Redis, HTTPS frontend/backend origins, secure
-cookies, network-restricted databases, and supervised Daphne, Celery worker,
-and Celery Beat processes. Apply migrations before deployment. Review publisher
+cookies, network-restricted databases, production-grade image builds and
+supervised Daphne, Celery workers, and Celery Beat. Review publisher
 terms/robots directives and crawler configuration before enabling a source.
-Compose currently provides development services, not a production service
-deployment.

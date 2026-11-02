@@ -15,12 +15,49 @@ does not ship fabricated prices, floorsheets, articles, or analysis.
   broker, and news/price comparison services.
 - `config`: Django settings, Celery, Channels consumer and JWT WebSocket auth.
 
-## Local setup
+## Docker Compose stack
 
-From the repository root in PowerShell:
+The root `docker-compose.yml` runs PostgreSQL, Redis, the Django/Daphne API,
+Next.js, two Celery workers, and one Celery Beat scheduler. From the repository
+root in PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build -d
+docker compose ps
+docker compose logs -f backend celery-worker-1 celery-worker-2 celery-beat
+```
+
+The backend runs migrations before serving. Create an initial Django
+administrator with:
+
+```powershell
+docker compose exec backend python manage.py createsuperuser
+```
+
+The Compose stack uses development defaults from `.env.example`. Replace the
+development Django key, database password, and crawler contact before using
+outside a private development environment. The frontend API/WebSocket URLs are
+build arguments, so rebuild the frontend after changing them:
+
+```powershell
+docker compose build frontend
+docker compose up -d frontend
+```
+
+Services are available at `http://localhost:3000` (frontend),
+`http://localhost:8000` (API/Admin), PostgreSQL port `5432`, and Redis port
+`6379`. Compose runs two independent workers, each with concurrency 2, and one
+Beat scheduler. Only one Beat service should run against this schedule.
+
+## Native local setup
+
+For running Django and Next.js outside Compose, start only PostgreSQL/Redis
+from the repository root:
 
 ```powershell
 Copy-Item backend\.env.example backend\.env
+Copy-Item frontend\.env.example frontend\.env.local
 docker compose up -d postgres redis
 python -m venv backend\.venv
 .\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
@@ -37,17 +74,22 @@ administrator credentials. A new superuser has Django `is_staff` and
 application role `Admin` when its profile is created. Public registrations
 remain `Viewer`.
 
-Run Celery worker and Beat from `backend\` in separate terminals:
-
-```powershell
-.\.venv\Scripts\celery.exe -A config worker --pool=solo --loglevel=info
-.\.venv\Scripts\celery.exe -A config beat --loglevel=info
-```
-
-For WebSockets, serve `config.asgi:application` with Daphne:
+In separate terminals, run the API with Daphne, two workers, and Beat from
+`backend\`:
 
 ```powershell
 .\.venv\Scripts\daphne.exe -b 127.0.0.1 -p 8000 config.asgi:application
+.\.venv\Scripts\celery.exe -A config worker --loglevel=info --concurrency=2 --hostname=worker1@%h
+.\.venv\Scripts\celery.exe -A config worker --loglevel=info --concurrency=2 --hostname=worker2@%h
+.\.venv\Scripts\celery.exe -A config beat --loglevel=info
+```
+
+Run the frontend from another terminal:
+
+```powershell
+Set-Location frontend
+npm.cmd ci
+npm.cmd run dev
 ```
 
 SQLite is a local test fallback. PostgreSQL/Supabase and Redis are expected for
@@ -95,8 +137,8 @@ Copy `backend\.env.example` to `backend\.env`.
 Never commit environment files or credentials. Production requires a strong
 secret, explicit hosts, HTTPS origins, TLS database connections, protected
 Redis/network access, secure cookies, and supervised Daphne/Celery processes.
-Run migrations before deployment. `docker-compose.yml` supplies local data
-services, not a production deployment.
+Run migrations before deployment. The Compose configuration and Dockerfiles are development deployment
+conveniences, not production hardening.
 
 ## Authentication and roles
 
@@ -173,20 +215,31 @@ details, `confidence_score`, `method` (`rule` or `analyst`), and
 
 ## Crawling and source restrictions
 
-Migrations register Merolagani, ShareSansar, NEPSE Alpha, and Bizmandu as
-**disabled** sources. Inspection found candidate paths for Merolagani
-(`NewsDetail.aspx?newsID=...`), ShareSansar (`/newsdetail/...`), and Bizmandu
-(`/content/<14-digit-id>.html`); migration configuration fills only blank
-listing fields and does not enable them. NEPSE Alpha remains unconfigured
-because a stable, policy-compliant news listing was not verified. These
-candidates are not evidence of a successful crawl. Re-check publisher terms,
-`robots.txt`, and page structure before enabling. The crawler checks robots
-rules, fails closed, enforces same-host links/redirects, waits between robots,
-listing, and article requests, bounds article count, extracts
+Migrations register the four requested sources as **disabled**, using these
+listing URLs and article patterns:
+
+| Source | Listing URL / template | Article URL pattern |
+|---|---|---|
+| Merolagani | `https://merolagani.com/NewsList.aspx` | `https://merolagani\.com/NewsDetail\.aspx\?newsID=\d+` |
+| ShareSansar | `https://www.sharesansar.com/news-page` | `https://www\.sharesansar\.com/(index\.php/)?newsdetail/[\w-]+` |
+| Bizmandu | `https://bizmandu.com/content/category/news.html` | `https://bizmandu\.com/content/\d+\.html` |
+| NEPSE Alpha | `https://www.nepsealpha.com/all-news?cid=1&page={page}` | `https://(www\.)?nepsealpha\.com/news(-article\|/article)/[\w-]+` |
+
+NEPSE Alpha pagination starts at page 1 and stops at the configured maximum
+(10 by default), the article cap, or the first later listing page that adds no
+new article links. The admin crawl-source API exposes the pagination template
+and maximum pages. The migration updates only known prior defaults or blank
+values, preserving custom source settings. These supplied patterns and paths
+are configuration requests, not confirmation of current publisher terms,
+robots permissions, page structure, or successful extraction. Verify the
+publisher's terms, `robots.txt`, contact requirements, and page behavior before
+enabling a source. The crawler checks robots rules on each listing and article
+URL, supports the www/apex pair for one publisher host, enforces same-site
+redirects, waits between requests, bounds pages and articles, extracts
 headline/body/date when present, and deduplicates canonical article URLs.
-Runs fail with an explicit error when no URLs match or no headline can be
-extracted; permanent 4xx errors are not retried (429 and server/network errors
-may retry). New articles are classified and emitted as Channels events.
+Runs fail explicitly when no URLs match or no headline can be extracted;
+permanent 4xx errors are not retried (429 and server/network errors may retry).
+New articles are classified and emitted as Channels events.
 
 Celery Beat schedules enabled sources every four hours. Redis connectivity and
 task autodiscovery were verified locally; no real source crawl was run and no

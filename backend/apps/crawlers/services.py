@@ -25,14 +25,22 @@ class NoArticlesDiscovered(Exception):
     pass
 
 
-def _canonical_article_url(base_url, href):
+def _same_site_host(first_host, second_host):
+    return first_host.lower().removeprefix("www.") == second_host.lower().removeprefix(
+        "www."
+    )
+
+
+def _canonical_article_url(base_url, href, canonical_host=None):
     resolved = urljoin(base_url, href)
     parsed = urlparse(resolved)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
     source_host = urlparse(base_url).hostname
-    if parsed.hostname.lower() != source_host.lower():
+    if not _same_site_host(parsed.hostname, source_host):
         return None
+    if canonical_host:
+        parsed = parsed._replace(netloc=canonical_host)
     return urlunparse(parsed._replace(fragment=""))
 
 
@@ -41,7 +49,7 @@ def _validate_response_host(response, source):
     expected_url = urlparse(source.base_url)
     final_host = final_url.hostname
     expected_host = expected_url.hostname
-    if not final_host or final_host.lower() != expected_host.lower():
+    if not final_host or not _same_site_host(final_host, expected_host):
         raise ValueError("Source redirected to a different host; response rejected.")
     if expected_url.scheme == "https" and final_url.scheme != "https":
         raise ValueError("Source redirected to an insecure HTTP URL; response rejected.")
@@ -147,9 +155,17 @@ def crawl_source(
         return response
 
     try:
-        if not source.listing_url or not source.article_url_pattern:
+        if (
+            not source.listing_url
+            or not source.article_url_pattern
+            or (
+                source.listing_pagination
+                and "{page}" not in source.listing_pagination
+            )
+        ):
             raise ValueError(
-                f"Source {source.key} is missing a listing URL or article URL pattern."
+                f"Source {source.key} is missing a listing URL, pagination "
+                "placeholder, or article URL pattern."
             )
         robots_url = urljoin(source.base_url, "/robots.txt")
         robots_response = get(robots_url)
@@ -162,44 +178,81 @@ def crawl_source(
             if robots_response.status_code == 200
             else []
         )
-        if not robots.can_fetch(user_agent, source.listing_url):
-            raise RobotsDenied(
-                f"robots.txt disallows listing URL {source.listing_url}"
-            )
         delay = max(1, source.request_interval_seconds)
         robots_delay = robots.crawl_delay(user_agent)
         if robots_delay is not None:
             delay = max(delay, int(robots_delay))
-        listing_response = get(source.listing_url, minimum_interval=delay)
-        _validate_response_host(listing_response, source)
-        listing_response.raise_for_status()
-
-        soup = BeautifulSoup(listing_response.text, "html.parser")
-        base_host = urlparse(source.base_url).hostname.lower()
+        base_host = urlparse(source.base_url).hostname
         pattern = re.compile(source.article_url_pattern)
         article_urls = []
 
-        def append_candidate(href):
-            candidate = _canonical_article_url(source.listing_url, href)
+        def append_candidate(href, listing_url):
+            candidate = _canonical_article_url(
+                listing_url,
+                href,
+                canonical_host=base_host,
+            )
             if (
-                candidate
-                and urlparse(candidate).hostname.lower() == base_host
-                and pattern.search(candidate)
-                and candidate not in article_urls
+                not candidate
+                or not _same_site_host(urlparse(candidate).hostname, base_host)
+                or not pattern.search(candidate)
             ):
+                return False
+            if candidate not in article_urls:
                 article_urls.append(candidate)
+            return True
 
-        for link in soup.select("a[href]"):
-            append_candidate(link.get("href", ""))
-            if len(article_urls) >= source.max_articles_per_run:
-                break
-        if len(article_urls) < source.max_articles_per_run:
-            for entry in soup.find_all(["item", "entry"]):
-                link = entry.find("link")
-                if link:
-                    append_candidate(link.get("href") or link.get_text(strip=True))
+        listing_pages = (
+            source.max_listing_pages if source.listing_pagination else 1
+        )
+        for page_number in range(1, listing_pages + 1):
+            listing_url = (
+                source.listing_pagination.format(page=page_number)
+                if source.listing_pagination
+                else source.listing_url
+            )
+            if not robots.can_fetch(user_agent, listing_url):
+                raise RobotsDenied(
+                    f"robots.txt disallows listing URL {listing_url}"
+                )
+            listing_response = get(listing_url, minimum_interval=delay)
+            _validate_response_host(listing_response, source)
+            listing_response.raise_for_status()
+
+            soup = BeautifulSoup(listing_response.text, "html.parser")
+            page_has_matching_candidates = False
+            for link in soup.select("a[href]"):
+                page_has_matching_candidates = (
+                    append_candidate(link.get("href", ""), listing_url)
+                    or page_has_matching_candidates
+                )
                 if len(article_urls) >= source.max_articles_per_run:
                     break
+            if len(article_urls) < source.max_articles_per_run:
+                for entry in soup.find_all(["item", "entry"]):
+                    link = entry.find("link")
+                    if link:
+                        page_has_matching_candidates = (
+                            append_candidate(
+                                link.get("href") or link.get_text(strip=True),
+                                listing_url,
+                            )
+                            or page_has_matching_candidates
+                        )
+                    if len(article_urls) >= source.max_articles_per_run:
+                        break
+            if not article_urls:
+                if not source.listing_pagination:
+                    break
+                continue
+            if len(article_urls) >= source.max_articles_per_run:
+                break
+            if (
+                source.listing_pagination
+                and page_number > 1
+                and not page_has_matching_candidates
+            ):
+                break
 
         if not article_urls:
             raise NoArticlesDiscovered(

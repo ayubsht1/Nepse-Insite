@@ -12,22 +12,35 @@ from apps.crawlers.tasks import crawl_enabled_sources, crawl_source
 class CrawlerTaskTests(TestCase):
     def test_observed_news_source_patterns_are_configured_but_disabled(self):
         examples = {
-            "merolagani": "https://merolagani.com/NewsDetail.aspx?newsID=12345",
-            "sharesansar": (
-                "https://www.sharesansar.com/newsdetail/company-news-example"
+            "merolagani": (
+                "https://merolagani.com/NewsDetail.aspx?newsID=12345"
             ),
-            "bizmandu": "https://bizmandu.com/content/20261102155602.html",
+            "sharesansar": (
+                "https://www.sharesansar.com/index.php/newsdetail/company-news-example"
+            ),
+            "bizmandu": "https://bizmandu.com/content/12345.html",
+            "nepsealpha": "https://nepsealpha.com/news-article/company-news",
+        }
+        expected_listings = {
+            "merolagani": "https://merolagani.com/NewsList.aspx",
+            "sharesansar": "https://www.sharesansar.com/news-page",
+            "bizmandu": "https://bizmandu.com/content/category/news.html",
+            "nepsealpha": (
+                "https://www.nepsealpha.com/all-news?cid=1&page=1"
+            ),
         }
         for key, example_url in examples.items():
             source = CrawlSource.objects.get(key=key)
             self.assertFalse(source.enabled)
-            self.assertTrue(source.listing_url)
+            self.assertEqual(source.listing_url, expected_listings[key])
             self.assertRegex(example_url, re.compile(source.article_url_pattern))
 
         nepse_alpha = CrawlSource.objects.get(key="nepsealpha")
-        self.assertFalse(nepse_alpha.enabled)
-        self.assertEqual(nepse_alpha.listing_url, "")
-        self.assertEqual(nepse_alpha.article_url_pattern, "")
+        self.assertEqual(
+            nepse_alpha.listing_pagination,
+            "https://www.nepsealpha.com/all-news?cid=1&page={page}",
+        )
+        self.assertEqual(nepse_alpha.max_listing_pages, 10)
 
     def test_disabled_seed_sources_are_not_scheduled(self):
         source = CrawlSource.objects.create(

@@ -78,6 +78,63 @@ class CrawlerServiceTests(TestCase):
         self.assertEqual(second_seen, [False])
         self.assertEqual(NewsCompanyTag.objects.filter(article=article).count(), 1)
 
+    def test_paginated_source_crawls_multiple_pages_and_accepts_www_alias(self):
+        self.source.base_url = "https://news.example.test"
+        self.source.listing_url = (
+            "https://news.example.test/all-news?cid=1&page=1"
+        )
+        self.source.listing_pagination = (
+            "https://news.example.test/all-news?cid=1&page={page}"
+        )
+        self.source.max_listing_pages = 5
+        self.source.article_url_pattern = (
+            r"https://(www\.)?news\.example\.test/article/\d+"
+        )
+        self.source.save()
+
+        def handler(request):
+            path = request.url.path
+            page_number = request.url.params.get("page")
+            if path == "/robots.txt":
+                return httpx.Response(
+                    200,
+                    text="User-agent: *\nAllow: /\n",
+                    request=request,
+                )
+            if path == "/all-news" and page_number == "1":
+                body = '<a href="https://www.news.example.test/article/1">one</a>'
+            elif path == "/all-news" and page_number == "2":
+                body = (
+                    '<a href="https://www.news.example.test/article/1">one</a>'
+                    '<a href="/article/2">two</a>'
+                )
+            elif path == "/all-news" and page_number == "3":
+                body = (
+                    '<a href="/article/2">two</a>'
+                    '<a href="/article/1">one</a>'
+                )
+            elif path == "/all-news" and page_number == "4":
+                body = "<html><body>No more news</body></html>"
+            elif path in {"/article/1", "/article/2"}:
+                body = (
+                    f'<meta property="og:title" content="Story {path[-1]}">'
+                )
+            else:
+                return httpx.Response(404, request=request)
+            return httpx.Response(200, text=body, request=request)
+
+        client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+        result = crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+
+        self.assertEqual(result["article_urls_found"], 2)
+        self.assertEqual(result["articles_extracted"], 2)
+        self.assertEqual(result["requests_made"], 7)
+        self.assertEqual(NewsArticle.objects.count(), 2)
+
     def test_crawl_fails_closed_when_robots_disallows_listing(self):
         client = self.client_for("User-agent: *\nDisallow: /\n")
         with self.assertRaises(RobotsDenied):
