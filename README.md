@@ -45,9 +45,9 @@ Pop-Location
 ```
 
 The new superuser has Django `is_staff`/`is_superuser` privileges for Django
-Admin but receives an independent `Viewer` application role. Sign into
-`/admin/`, open User profiles, and explicitly assign the application `Admin`
-role before using the protected application admin APIs.
+Admin and automatically receives an independent `Admin` application role.
+Public registrations remain `Viewer`; the application role is stored on the
+user profile.
 
 Run Celery worker and Beat from `backend\` in separate terminals:
 

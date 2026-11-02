@@ -33,9 +33,9 @@ Pop-Location
 
 `createsuperuser` runs interactively; the repository contains no initial
 administrator credentials. A new superuser has Django `is_staff` and
-`is_superuser` privileges for Django Admin but is assigned the independent
-application role `Viewer`. In `/admin/`, explicitly assign that trusted
-account's `UserProfile.role` to `admin` to enable application admin APIs.
+`is_superuser` privileges for Django Admin and receives the independent
+application role `Admin` when its profile is created. Public registrations
+remain `Viewer`.
 
 Run Celery worker and Beat from `backend\` in separate terminals:
 

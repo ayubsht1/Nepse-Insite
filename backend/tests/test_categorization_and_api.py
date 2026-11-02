@@ -164,20 +164,19 @@ class CategorizationAndApiTests(TestCase):
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
 
-    def test_superuser_application_role_is_not_inferred_from_django_flags(self):
+    def test_new_superuser_receives_application_admin_role(self):
         django_superuser = User.objects.create_superuser(
             username="django-root",
             email="root@example.test",
             password="A-valid-long-password-093!",
         )
-        django_superuser.profile.role = UserProfile.Role.VIEWER
-        django_superuser.profile.save(update_fields=["role"])
         self.client.force_authenticate(django_superuser)
 
-        self.assertEqual(self.client.get("/api/admin/users/").status_code, 403)
+        self.assertEqual(django_superuser.profile.role, UserProfile.Role.ADMIN)
+        self.assertEqual(self.client.get("/api/admin/users/").status_code, 200)
         self.assertEqual(
             self.client.get("/api/users/me/").data["role"],
-            UserProfile.Role.VIEWER,
+            UserProfile.Role.ADMIN,
         )
 
     def test_logout_blacklists_only_the_authenticated_users_refresh_token(self):

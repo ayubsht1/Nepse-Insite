@@ -9,5 +9,12 @@ from .models import UserProfile
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
         UserProfile.objects.get_or_create(
-            user=instance, defaults={"role": UserProfile.Role.VIEWER}
+            user=instance,
+            defaults={
+                "role": (
+                    UserProfile.Role.ADMIN
+                    if instance.is_superuser
+                    else UserProfile.Role.VIEWER
+                )
+            },
         )
