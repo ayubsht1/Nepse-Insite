@@ -53,6 +53,29 @@ For WebSockets, serve `config.asgi:application` with Daphne:
 SQLite is a local test fallback. PostgreSQL/Supabase and Redis are expected for
 deployment.
 
+## Development demo seed
+
+From `backend\`, after applying migrations to a development database:
+
+```powershell
+.\.venv\Scripts\python.exe manage.py seed
+```
+
+The command requires `DEBUG=True`, runs atomically, is repeatable, and uses
+create-only defaults so existing rows are not overwritten or deleted. It adds
+eight companies and 22 weekday OHLCV rows per company, six fictional news
+articles and tags, 24 fictional floorsheet transactions, three demo role
+accounts, and four sample crawl runs. Every sample is marked with a `DEMO`
+source, `[DEMO]` headline, `.invalid` URL, or crawl-run message; none represents
+a real price, transaction, publisher article, or network crawl. Demo users
+have unusable passwords by default and do not receive Django staff or
+superuser privileges. `--password` optionally sets a validated password for
+new demo users only; it never changes existing credentials.
+
+Do not run the seed against production. The development-only guard is not a
+substitute for checking the selected database before running management
+commands.
+
 ## Environment and deployment
 
 Copy `backend\.env.example` to `backend\.env`.
@@ -151,18 +174,26 @@ details, `confidence_score`, `method` (`rule` or `analyst`), and
 ## Crawling and source restrictions
 
 Migrations register Merolagani, ShareSansar, NEPSE Alpha, and Bizmandu as
-**disabled** sources. Verify current publisher terms and `robots.txt` before
-enabling; configure the true listing URL, narrow article URL pattern, and
-operator contact. The crawler checks robots rules, fails closed, enforces
-same-host links/redirects, honors crawl delay, bounds article count, extracts
+**disabled** sources. Inspection found candidate paths for Merolagani
+(`NewsDetail.aspx?newsID=...`), ShareSansar (`/newsdetail/...`), and Bizmandu
+(`/content/<14-digit-id>.html`); migration configuration fills only blank
+listing fields and does not enable them. NEPSE Alpha remains unconfigured
+because a stable, policy-compliant news listing was not verified. These
+candidates are not evidence of a successful crawl. Re-check publisher terms,
+`robots.txt`, and page structure before enabling. The crawler checks robots
+rules, fails closed, enforces same-host links/redirects, waits between robots,
+listing, and article requests, bounds article count, extracts
 headline/body/date when present, and deduplicates canonical article URLs.
-New articles are classified and emitted as Channels events.
+Runs fail with an explicit error when no URLs match or no headline can be
+extracted; permanent 4xx errors are not retried (429 and server/network errors
+may retry). New articles are classified and emitted as Channels events.
 
-Celery Beat schedules enabled sources every four hours. Source-specific listing
-URLs/selectors are intentionally not guessed. No one-month OHLCV or sample
-floorsheet provider/data is configured; import only verified, licensed
-records. The frontend and APIs report unavailable data rather than making it
-up.
+Celery Beat schedules enabled sources every four hours. Redis connectivity and
+task autodiscovery were verified locally; no real source crawl was run and no
+live article persistence is claimed. Import genuine OHLCV and floorsheet data
+only from verified, licensed providers. The seed command's demo records are
+fictional and separately marked. The frontend and APIs report unavailable
+genuine data rather than making it up.
 
 ## Market calculations and limits
 

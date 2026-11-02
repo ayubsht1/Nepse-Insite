@@ -2,8 +2,8 @@
 
 NEPSE Insight is a Next.js dashboard backed by Django REST Framework. It stores
 provenance-tracked company, OHLCV, floorsheet, and news records; analytics are
-computed only from data actually present. The repository does not include
-sample market prices, floorsheets, or news.
+computed only from data actually present. Optional development demo data is
+created with `python manage.py seed` and is explicitly labeled as fabricated.
 
 ## Architecture
 
@@ -48,6 +48,23 @@ The new superuser has Django `is_staff`/`is_superuser` privileges for Django
 Admin and automatically receives an independent `Admin` application role.
 Public registrations remain `Viewer`; the application role is stored on the
 user profile.
+
+To populate a development database with clearly marked demonstration records:
+
+```powershell
+Push-Location backend
+.\.venv\Scripts\python.exe manage.py seed
+Pop-Location
+```
+
+The command is disabled when `DEBUG=False`, is repeatable without changing
+existing records, and creates eight sample companies, 22 weekday OHLCV rows per
+company, fictional news and tags, fictional floorsheet transactions, demo
+role accounts with unusable passwords, and sample crawl runs explicitly marked
+as not crawled. Demo Admin is an application role only, not a Django
+superuser. Optionally pass `--password` to set a validated password on newly
+created demo accounts only. These records are for UI/development testing and
+must not be treated as real market or publisher data.
 
 Run Celery worker and Beat from `backend\` in separate terminals:
 
@@ -115,15 +132,19 @@ market calculation methodology.
 
 ## Data collection and limitations
 
-The four known news-source records are seeded **disabled**. Before enabling
-one, verify its current terms and `robots.txt`, then configure its listing URL,
-article URL pattern, and a real crawler contact. Celery Beat schedules enabled
-sources every four hours. OHLCV and floorsheet records must currently be
-imported from a verified/licensed source; no provider configuration or dataset
-is included. Consequently, prices, transaction VWAP, broker activity, anomaly
-scores, and news-market observations remain unavailable until sourced records
-exist. The pressure value is only an OHLCV close-location estimate, not actual
-buy/sell volume.
+All four news sources remain **disabled** by default. Current page inspection
+provided candidate listing paths for Merolagani, ShareSansar, and Bizmandu;
+NEPSE Alpha has no configured listing because its homepage is app-rendered and
+restricted paths are not a news API. These are configuration candidates, not
+proof that a crawl succeeds. The crawler records empty discovery/parsing as a
+failed run and avoids retrying permanent HTTP 4xx responses (except 429).
+Verify publisher terms and current `robots.txt` before enabling any source.
+No live crawl or article persistence was verified during this work. OHLCV and
+floorsheet records must otherwise come from a verified/licensed source.
+Consequently, market calculations on demo records are explicitly fictional;
+production analysis remains unavailable until sourced records exist. The
+pressure value is only an OHLCV close-location estimate, not actual buy/sell
+volume.
 
 ## API and real-time docs
 
@@ -151,7 +172,8 @@ Pop-Location
 ```
 
 Tests use isolated databases and mocked crawler HTTP; they do not crawl public
-sites or seed fabricated market data.
+sites. Seed-command verification uses a separate temporary development
+database; seeded data must not be used as real market information.
 
 ## Production deployment
 
