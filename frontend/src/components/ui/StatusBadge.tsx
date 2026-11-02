@@ -26,17 +26,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   const getVariantStyles = () => {
     switch (variant) {
       case 'success':
-        return 'text-emerald-400 bg-emerald-950/40 border-emerald-800/60';
+        return 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-950/40 dark:border-emerald-800/60';
       case 'danger':
-        return 'text-rose-400 bg-rose-950/40 border-rose-800/60';
+        return 'text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-950/40 dark:border-rose-800/60';
       case 'warning':
-        return 'text-amber-400 bg-amber-950/40 border-amber-800/60';
+        return 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/40 dark:border-amber-800/60';
       case 'info':
-        return 'text-sky-400 bg-sky-950/40 border-sky-800/60';
+        return 'text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-400 dark:bg-sky-950/40 dark:border-sky-800/60';
       case 'purple':
-        return 'text-purple-400 bg-purple-950/40 border-purple-800/60';
+        return 'text-purple-700 bg-purple-50 border-purple-200 dark:text-purple-400 dark:bg-purple-950/40 dark:border-purple-800/60';
       default:
-        return 'text-slate-300 bg-slate-900 border-slate-800';
+        return 'text-slate-700 bg-slate-100 border-slate-200 dark:text-slate-300 dark:bg-slate-900 dark:border-slate-800';
     }
   };
 

@@ -116,10 +116,10 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
       sortable: true,
       render: (b) => (
         <div className="flex items-center gap-2">
-          <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-200">
+          <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200">
             #{b.brokerNumber}
           </span>
-          <span className="text-xs text-slate-300 truncate max-w-[160px]">
+          <span className="text-xs text-slate-700 dark:text-slate-300 truncate max-w-[160px]">
             {b.brokerName}
           </span>
         </div>
@@ -171,7 +171,7 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
       align: 'right',
       sortable: true,
       render: (b) => (
-        <span className="font-mono text-slate-300">
+        <span className="font-mono text-slate-700 dark:text-slate-300">
           {formatNPR(Math.abs(b.netAmount), false)}
         </span>
       ),
@@ -183,7 +183,7 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
       <div className="space-y-6">
         <button
           onClick={() => setUiState('normal')}
-          className="text-xs px-3 py-1 bg-slate-800 text-slate-300 rounded border border-slate-700"
+          className="text-xs px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700"
         >
           Exit Loading State
         </button>
@@ -198,7 +198,7 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
       <div className="space-y-6">
         <button
           onClick={() => setUiState('normal')}
-          className="text-xs px-3 py-1 bg-slate-800 text-slate-300 rounded border border-slate-700 mb-4"
+          className="text-xs px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700 mb-4"
         >
           Reset View
         </button>
@@ -422,20 +422,22 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
                 <XAxis
                   dataKey="date"
-                  stroke="#64748b"
+                  stroke="var(--chart-axis)"
+                  tick={{ fill: 'var(--chart-label)' }}
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#334155' }}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
                 />
                 <YAxis
-                  stroke="#64748b"
+                  stroke="var(--chart-axis)"
+                  tick={{ fill: 'var(--chart-label)' }}
                   fontSize={11}
                   domain={['dataMin - 10', 'dataMax + 10']}
                   tickLine={false}
-                  axisLine={{ stroke: '#334155' }}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
                   tickFormatter={(val) => Math.round(val).toString()}
                 />
                 <Tooltip content={<CustomPriceTooltip />} />
@@ -474,19 +476,21 @@ export const CompanyDetailsView: React.FC<CompanyDetailsViewProps> = ({ onBack }
           <div className="h-32 sm:h-44 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={historyData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
                 <XAxis
                   dataKey="date"
-                  stroke="#64748b"
+                  stroke="var(--chart-axis)"
+                  tick={{ fill: 'var(--chart-label)' }}
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#334155' }}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
                 />
                 <YAxis
-                  stroke="#64748b"
+                  stroke="var(--chart-axis)"
+                  tick={{ fill: 'var(--chart-label)' }}
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#334155' }}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
                   tickFormatter={(v) => formatVolume(v)}
                 />
                 <Tooltip content={<CustomVolumeTooltip />} />

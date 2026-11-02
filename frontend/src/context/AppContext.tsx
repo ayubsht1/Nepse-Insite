@@ -96,6 +96,14 @@ export const AppProvider: React.FC<{
     };
     window.addEventListener('auth:expired', handleExpiredSession);
 
+    try {
+      if (window.localStorage.getItem('nepse_insight_theme') === 'light') {
+        setThemeState('light');
+      }
+    } catch (error) {
+      console.warn('Unable to read the saved theme preference.', error);
+    }
+
     if (!getAccessToken()) {
       setAuthLoading(false);
     } else {
@@ -115,14 +123,6 @@ export const AppProvider: React.FC<{
         .finally(() => {
           if (active) setAuthLoading(false);
         });
-    }
-
-    try {
-      if (window.localStorage.getItem('nepse_insight_theme') === 'light') {
-        setThemeState('light');
-      }
-    } catch (error) {
-      console.warn('Unable to read the saved theme preference.', error);
     }
 
     return () => {

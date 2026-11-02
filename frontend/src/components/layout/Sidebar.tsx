@@ -132,7 +132,7 @@ export const Sidebar: React.FC = () => {
                     isLocked ? (
                       <Lock className="w-3.5 h-3.5 text-slate-400" />
                     ) : (
-                      <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/50">
+                      <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-400 dark:border-emerald-800/50">
                         ADMIN
                       </span>
                     )

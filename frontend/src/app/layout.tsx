@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Script from 'next/script';
 import type { ReactNode } from 'react';
 import './globals.css';
 
@@ -24,8 +25,16 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
+        <Script id="theme-preference" strategy="beforeInteractive">
+          {`try {
+            const theme = window.localStorage.getItem('nepse_insight_theme');
+            document.documentElement.classList.toggle('dark', theme !== 'light');
+          } catch {
+            document.documentElement.classList.add('dark');
+          }`}
+        </Script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
