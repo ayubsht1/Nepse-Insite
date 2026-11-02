@@ -1,15 +1,16 @@
 import os
 
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
+
+from django.core.asgi import get_asgi_application
+
+django_asgi_app = get_asgi_application()
+
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 from config.routing import websocket_urlpatterns
 from config.websocket_auth import JwtWebSocketAuthMiddleware
-from django.core.asgi import get_asgi_application
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
-
-django_asgi_app = get_asgi_application()
 
 application = ProtocolTypeRouter(
     {
