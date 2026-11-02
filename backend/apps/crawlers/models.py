@@ -7,7 +7,14 @@ class CrawlSource(models.Model):
     key = models.SlugField(max_length=64, unique=True)
     base_url = models.URLField(max_length=512)
     listing_url = models.URLField(max_length=1024, blank=True)
-    listing_pagination = models.CharField(max_length=1024, blank=True)
+    listing_pagination = models.CharField(
+        max_length=1024,
+        blank=True,
+        help_text=(
+            "Optional page selector: a query parameter name (page), a query "
+            "template (?page={page}), or a full URL template containing {page}."
+        ),
+    )
     article_url_pattern = models.CharField(max_length=512, blank=True)
     enabled = models.BooleanField(default=False)
     request_interval_seconds = models.PositiveSmallIntegerField(default=10)

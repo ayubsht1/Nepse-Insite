@@ -2,7 +2,13 @@ import httpx
 from django.test import TestCase
 
 from apps.crawlers.models import CrawlSource
-from apps.crawlers.services import NoArticlesDiscovered, RobotsDenied, crawl_source
+from apps.crawlers.serializers import CrawlSourceSerializer
+from apps.crawlers.services import (
+    NoArticlesDiscovered,
+    RobotsDenied,
+    build_listing_url,
+    crawl_source,
+)
 from apps.news.models import NewsArticle, NewsCompanyTag
 from .factories import create_company
 
@@ -134,6 +140,134 @@ class CrawlerServiceTests(TestCase):
         self.assertEqual(result["articles_extracted"], 2)
         self.assertEqual(result["requests_made"], 7)
         self.assertEqual(NewsArticle.objects.count(), 2)
+
+    def test_listing_url_builder_supports_parameter_names_and_templates(self):
+        listing_url = "https://news.example.test/all-news?cid=1&page=1"
+        cases = (
+            ("page", "https://news.example.test/all-news?cid=1&page=2"),
+            ("page={page}", "https://news.example.test/all-news?cid=1&page=2"),
+            ("?page={page}", "https://news.example.test/all-news?cid=1&page=2"),
+            (
+                "https://news.example.test/all-news?cid=1&page={page}",
+                "https://news.example.test/all-news?cid=1&page=2",
+            ),
+        )
+
+        for pagination, expected in cases:
+            with self.subTest(pagination=pagination):
+                self.assertEqual(
+                    build_listing_url(listing_url, pagination, 2), expected
+                )
+
+    def test_crawl_paginates_when_pagination_is_a_query_parameter_name(self):
+        self.source.listing_url = (
+            "https://news.example.test/news?category=markets&page=1"
+        )
+        self.source.listing_pagination = "page"
+        self.source.max_listing_pages = 3
+        self.source.save()
+        listing_pages = []
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(
+                    200,
+                    text="User-agent: *\nAllow: /\n",
+                    request=request,
+                )
+            if request.url.path == "/news":
+                listing_pages.append(request.url.params.get("page"))
+                body = (
+                    '<a href="/article/1">story</a>'
+                    if request.url.params.get("page") == "1"
+                    else "<html><body>No more news</body></html>"
+                )
+                return httpx.Response(200, text=body, request=request)
+            if request.url.path == "/article/1":
+                return httpx.Response(
+                    200,
+                    text='<meta property="og:title" content="Market story">',
+                    request=request,
+                )
+            return httpx.Response(404, request=request)
+
+        client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+        result = crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+
+        self.assertEqual(listing_pages, ["1", "2"])
+        self.assertEqual(result["article_urls_found"], 1)
+        self.assertEqual(NewsArticle.objects.get().url, "https://news.example.test/article/1")
+
+    def test_crawl_resolves_relative_article_links_against_listing_url(self):
+        self.source.listing_url = "https://news.example.test/news/archive/"
+        self.source.article_url_pattern = r"/news/archive/article/1$"
+        self.source.save()
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(
+                    200,
+                    text="User-agent: *\nAllow: /\n",
+                    request=request,
+                )
+            if request.url.path == "/news/archive/":
+                return httpx.Response(
+                    200,
+                    text='<a href="article/1">relative story</a>',
+                    request=request,
+                )
+            if request.url.path == "/news/archive/article/1":
+                return httpx.Response(
+                    200,
+                    text='<meta property="og:title" content="Relative story">',
+                    request=request,
+                )
+            return httpx.Response(404, request=request)
+
+        client = httpx.Client(
+            transport=httpx.MockTransport(handler),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+        crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+
+        self.assertEqual(
+            NewsArticle.objects.get().url,
+            "https://news.example.test/news/archive/article/1",
+        )
+
+    def test_invalid_paginated_url_is_rejected_before_any_request(self):
+        self.source.listing_pagination = (
+            "https://external.test/news?page={page}"
+        )
+        self.source.save()
+        requests = []
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: requests.append(request.url)
+                or httpx.Response(200, request=request)
+            ),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+
+        with self.assertRaisesRegex(ValueError, "Invalid listing URL"):
+            crawl_source(self.source, client=client, sleep=lambda _: None)
+
+        client.close()
+        self.assertEqual(requests, [])
+
+    def test_source_serializer_accepts_pagination_parameter_name(self):
+        serializer = CrawlSourceSerializer(
+            instance=self.source,
+            data={"listing_pagination": "page"},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
 
     def test_crawl_fails_closed_when_robots_disallows_listing(self):
         client = self.client_for("User-agent: *\nDisallow: /\n")

@@ -3,7 +3,7 @@ import re
 import time
 from datetime import datetime, timezone as datetime_timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -23,6 +23,61 @@ class RobotsDenied(Exception):
 
 class NoArticlesDiscovered(Exception):
     pass
+
+
+def build_listing_url(listing_url, pagination, page_number):
+    if not pagination:
+        return listing_url
+
+    placeholder_count = pagination.count("{page}")
+    if placeholder_count > 1 or (
+        ("{" in pagination or "}" in pagination) and not placeholder_count
+    ):
+        raise ValueError("Pagination must contain at most one {page} placeholder.")
+
+    if not placeholder_count:
+        if (
+            any(character in pagination for character in "?#/=&")
+            or not pagination.strip()
+            or pagination != pagination.strip()
+        ):
+            raise ValueError(
+                "Pagination without a {page} placeholder must be a query "
+                "parameter name."
+            )
+        updates = [(pagination, str(page_number))]
+        return _merge_listing_query(listing_url, updates)
+
+    try:
+        template_url = pagination.format(page=page_number)
+    except (IndexError, KeyError, ValueError) as exc:
+        raise ValueError("Pagination URL template must use only {page}.") from exc
+
+    parsed_template = urlparse(template_url)
+    if parsed_template.scheme:
+        return template_url
+    if template_url.startswith("?") or (
+        "=" in parsed_template.path and "/" not in parsed_template.path
+    ):
+        query = parsed_template.query if template_url.startswith("?") else template_url
+        updates = parse_qsl(query, keep_blank_values=True)
+        if not updates:
+            raise ValueError("Pagination query template must include a query parameter.")
+        return _merge_listing_query(listing_url, updates)
+    return urljoin(listing_url, template_url)
+
+
+def _merge_listing_query(listing_url, updates):
+    parsed_listing = urlparse(listing_url)
+    replaced_keys = {key for key, _ in updates}
+    existing = [
+        (key, value)
+        for key, value in parse_qsl(parsed_listing.query, keep_blank_values=True)
+        if key not in replaced_keys
+    ]
+    return urlunparse(
+        parsed_listing._replace(query=urlencode([*existing, *updates], doseq=True))
+    )
 
 
 def _same_site_host(first_host, second_host):
@@ -53,6 +108,40 @@ def _validate_response_host(response, source):
         raise ValueError("Source redirected to a different host; response rejected.")
     if expected_url.scheme == "https" and final_url.scheme != "https":
         raise ValueError("Source redirected to an insecure HTTP URL; response rejected.")
+
+
+def _validate_request_url(url, source, purpose):
+    error_message = f"Invalid {purpose} URL for crawl source {source.key}: {url!r}"
+    try:
+        parsed_url = urlparse(url)
+        source_url = urlparse(source.base_url)
+        parsed_url.port
+        source_url.port
+    except ValueError as exc:
+        logger.error(
+            "Rejecting invalid %s URL for crawl source %s: %r",
+            purpose,
+            source.key,
+            url,
+        )
+        raise ValueError(error_message) from exc
+
+    valid = (
+        parsed_url.scheme in {"http", "https"}
+        and parsed_url.hostname is not None
+        and source_url.scheme in {"http", "https"}
+        and source_url.hostname is not None
+        and _same_site_host(parsed_url.hostname, source_url.hostname)
+        and not (source_url.scheme == "https" and parsed_url.scheme != "https")
+    )
+    if not valid:
+        logger.error(
+            "Rejecting invalid %s URL for crawl source %s: %r",
+            purpose,
+            source.key,
+            url,
+        )
+        raise ValueError(error_message)
 
 
 def _date_from_value(value):
@@ -141,8 +230,9 @@ def crawl_source(
         )
     user_agent = client.headers.get("User-Agent", "NEPSEInsightBot/1.0")
 
-    def get(url, minimum_interval=1):
+    def get(url, purpose, minimum_interval=1):
         nonlocal requests_made, last_request_at
+        _validate_request_url(url, source, purpose)
         if last_request_at is not None:
             elapsed = time.monotonic() - last_request_at
             if elapsed < minimum_interval:
@@ -155,20 +245,36 @@ def crawl_source(
         return response
 
     try:
-        if (
-            not source.listing_url
-            or not source.article_url_pattern
-            or (
-                source.listing_pagination
-                and "{page}" not in source.listing_pagination
-            )
-        ):
+        if not source.listing_url or not source.article_url_pattern:
             raise ValueError(
-                f"Source {source.key} is missing a listing URL, pagination "
-                "placeholder, or article URL pattern."
+                f"Source {source.key} is missing a listing URL or article URL pattern."
             )
+        _validate_request_url(source.base_url, source, "base")
+        _validate_request_url(source.listing_url, source, "listing")
+        pattern = re.compile(source.article_url_pattern)
+        listing_pages = source.max_listing_pages if source.listing_pagination else 1
+        try:
+            listing_urls = [
+                build_listing_url(
+                    source.listing_url, source.listing_pagination, page_number
+                )
+                for page_number in range(1, listing_pages + 1)
+            ]
+        except ValueError as exc:
+            logger.error(
+                "Invalid pagination configuration for crawl source %s: %s",
+                source.key,
+                exc,
+            )
+            raise ValueError(
+                f"Invalid pagination configuration for crawl source "
+                f"{source.key}: {exc}"
+            ) from exc
+        for listing_url in listing_urls:
+            _validate_request_url(listing_url, source, "listing")
+
         robots_url = urljoin(source.base_url, "/robots.txt")
-        robots_response = get(robots_url)
+        robots_response = get(robots_url, "robots")
         _validate_response_host(robots_response, source)
         if robots_response.status_code not in {200, 404}:
             robots_response.raise_for_status()
@@ -183,7 +289,6 @@ def crawl_source(
         if robots_delay is not None:
             delay = max(delay, int(robots_delay))
         base_host = urlparse(source.base_url).hostname
-        pattern = re.compile(source.article_url_pattern)
         article_urls = []
 
         def append_candidate(href, listing_url):
@@ -202,20 +307,12 @@ def crawl_source(
                 article_urls.append(candidate)
             return True
 
-        listing_pages = (
-            source.max_listing_pages if source.listing_pagination else 1
-        )
-        for page_number in range(1, listing_pages + 1):
-            listing_url = (
-                source.listing_pagination.format(page=page_number)
-                if source.listing_pagination
-                else source.listing_url
-            )
+        for page_number, listing_url in enumerate(listing_urls, start=1):
             if not robots.can_fetch(user_agent, listing_url):
                 raise RobotsDenied(
                     f"robots.txt disallows listing URL {listing_url}"
                 )
-            listing_response = get(listing_url, minimum_interval=delay)
+            listing_response = get(listing_url, "listing", minimum_interval=delay)
             _validate_response_host(listing_response, source)
             listing_response.raise_for_status()
 
@@ -266,7 +363,7 @@ def crawl_source(
                 logger.info("Skipping robots-disallowed article URL: %s", article_url)
                 article_urls_disallowed += 1
                 continue
-            response = get(article_url, minimum_interval=delay)
+            response = get(article_url, "article", minimum_interval=delay)
             _validate_response_host(response, source)
             response.raise_for_status()
             data = _article_data(response.text, article_url)

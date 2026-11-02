@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from rest_framework import serializers
 
 from .models import CrawlRun, CrawlSource
+from .services import build_listing_url
 
 
 class CrawlSourceSerializer(serializers.ModelSerializer):
@@ -58,17 +59,23 @@ class CrawlSourceSerializer(serializers.ModelSerializer):
                     {"listing_url": "Listing URL must use the source's host."}
                 )
         if listing_pagination:
-            if listing_pagination.count("{page}") != 1:
+            if listing_pagination.count("{page}") > 1 or (
+                ("{" in listing_pagination or "}" in listing_pagination)
+                and "{page}" not in listing_pagination
+            ):
                 raise serializers.ValidationError(
                     {
                         "listing_pagination": (
-                            "Pagination URL must contain exactly one {page} placeholder."
+                            "Pagination must contain at most one {page} placeholder."
                         )
                     }
                 )
             try:
-                pagination = urlparse(listing_pagination.format(page=1))
-            except (KeyError, ValueError) as exc:
+                pagination_url = build_listing_url(
+                    listing_url, listing_pagination, 1
+                )
+                pagination = urlparse(pagination_url)
+            except (IndexError, KeyError, ValueError) as exc:
                 raise serializers.ValidationError(
                     {"listing_pagination": "Invalid pagination URL template."}
                 ) from exc
