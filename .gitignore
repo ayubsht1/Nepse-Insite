@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.local.example
+frontend/.env.local
+backend/.env
+
+# Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+backend/celerybeat-schedule*
+backend/staticfiles/
+backend/media/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/coverage/
+npm-debug.log*
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
