@@ -1,11 +1,15 @@
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.test import APIClient
 
 from apps.news.models import NewsArticle, NewsCompanyTag
 from apps.users.models import UserProfile
 from .factories import create_company, create_user
+
+User = get_user_model()
 
 
 class CategorizationAndApiTests(TestCase):
@@ -139,3 +143,73 @@ class CategorizationAndApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data["vwap"]["available"])
         self.assertIsNone(response.data["latest_price"])
+
+    def test_public_registration_always_assigns_viewer_and_no_django_privileges(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "self-promoter",
+                "email": "self-promoter@example.test",
+                "password": "A-valid-long-password-093!",
+                "role": "admin",
+                "is_staff": True,
+                "is_superuser": True,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        user = UserProfile.objects.get(user__username="self-promoter").user
+        self.assertEqual(response.data["role"], UserProfile.Role.VIEWER)
+        self.assertEqual(user.profile.role, UserProfile.Role.VIEWER)
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_superuser_application_role_is_not_inferred_from_django_flags(self):
+        django_superuser = User.objects.create_superuser(
+            username="django-root",
+            email="root@example.test",
+            password="A-valid-long-password-093!",
+        )
+        django_superuser.profile.role = UserProfile.Role.VIEWER
+        django_superuser.profile.save(update_fields=["role"])
+        self.client.force_authenticate(django_superuser)
+
+        self.assertEqual(self.client.get("/api/admin/users/").status_code, 403)
+        self.assertEqual(
+            self.client.get("/api/users/me/").data["role"],
+            UserProfile.Role.VIEWER,
+        )
+
+    def test_logout_blacklists_only_the_authenticated_users_refresh_token(self):
+        self.client.force_authenticate(self.viewer)
+        refresh = str(RefreshToken.for_user(self.viewer))
+        self.client.cookies["nepse_refresh"] = str(RefreshToken.for_user(self.analyst))
+        denied = self.client.post(
+            "/api/auth/logout/",
+            {},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 400)
+
+        self.client.cookies["nepse_refresh"] = refresh
+        response = self.client.post("/api/auth/logout/", {}, format="json")
+        self.assertEqual(response.status_code, 204)
+        refresh_response = self.client.post(
+            "/api/auth/token/refresh/", {}, format="json"
+        )
+        self.assertEqual(refresh_response.status_code, 400)
+
+    def test_jwt_login_keeps_refresh_token_in_http_only_cookie(self):
+        self.viewer.set_password("test-password")
+        self.viewer.save(update_fields=["password"])
+        response = self.client.post(
+            "/api/auth/token/",
+            {"username": self.viewer.username, "password": "test-password"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertNotIn("refresh", response.data)
+        cookie = response.cookies["nepse_refresh"]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")

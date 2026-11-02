@@ -12,11 +12,9 @@ class UserSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "role"]
+        fields = ["id", "username", "first_name", "email", "role"]
 
     def get_role(self, user):
-        if user.is_superuser:
-            return UserProfile.Role.ADMIN
         return (
             UserProfile.objects.filter(user_id=user.pk)
             .values_list("role", flat=True)
@@ -46,14 +44,6 @@ class AdminUserSerializer(serializers.ModelSerializer):
         if self.instance is None and not attrs.get("password"):
             raise serializers.ValidationError(
                 {"password": "A password is required when creating a user."}
-            )
-        if (
-            self.instance
-            and self.instance.is_superuser
-            and attrs.get("role", UserProfile.Role.ADMIN) != UserProfile.Role.ADMIN
-        ):
-            raise serializers.ValidationError(
-                {"role": "A superuser must retain the admin role."}
             )
         return attrs
 
@@ -87,13 +77,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             .values_list("role", flat=True)
             .first()
         )
-        result["role"] = (
-            UserProfile.Role.ADMIN
-            if instance.is_superuser
-            else profile_role
-            if profile_role
-            else UserProfile.Role.VIEWER
-        )
+        result["role"] = profile_role or UserProfile.Role.VIEWER
         return result
 
 
@@ -108,3 +92,25 @@ class WatchlistSerializer(serializers.ModelSerializer):
         model = Watchlist
         fields = ["id", "company", "symbol", "company_name", "created_at"]
         read_only_fields = ["id", "created_at"]
+
+
+class RegistrationSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, style={"input_type": "password"}
+    )
+
+    class Meta:
+        model = User
+        fields = ["id", "username", "first_name", "email", "password"]
+        read_only_fields = ["id"]
+
+    def validate_password(self, password):
+        password_validation.validate_password(password)
+        return password
+
+    def create(self, validated_data):
+        user = User.objects.create_user(**validated_data)
+        UserProfile.objects.update_or_create(
+            user=user, defaults={"role": UserProfile.Role.VIEWER}
+        )
+        return user

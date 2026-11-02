@@ -2,8 +2,6 @@ from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
 def user_role(user):
-    if user.is_superuser:
-        return "admin"
     from apps.users.models import UserProfile
 
     return (

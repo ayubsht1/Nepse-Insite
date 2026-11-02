@@ -1,0 +1,6 @@
+{
+  "name": "NEPSE Insight - Nepal Stock Market Analytics",
+  "description": "Real-time NEPSE stock market analytics, financial news intelligence, VWAP broker breakdowns, and cross-company comparisons.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

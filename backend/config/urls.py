@@ -6,12 +6,22 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from apps.users.views import (
+    CsrfCookieView,
+    JwtLoginView,
+    JwtRefreshView,
+    LogoutView,
+    RegistrationView,
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/auth/csrf/", CsrfCookieView.as_view(), name="csrf-cookie"),
+    path("api/auth/token/", JwtLoginView.as_view(), name="token_obtain_pair"),
+    path("api/auth/token/refresh/", JwtRefreshView.as_view(), name="token_refresh"),
+    path("api/auth/register/", RegistrationView.as_view(), name="register"),
+    path("api/auth/logout/", LogoutView.as_view(), name="logout"),
     path("api/admin/users/", include("apps.users.admin_urls")),
     path(
         "api/schema/",

@@ -1,16 +1,89 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_protect
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from common.permissions import IsAdminRole
 from common.permissions import user_role
 from .models import Watchlist
-from .serializers import AdminUserSerializer, UserSummarySerializer, WatchlistSerializer
+from .serializers import (
+    AdminUserSerializer,
+    RegistrationSerializer,
+    UserSummarySerializer,
+    WatchlistSerializer,
+)
 
 User = get_user_model()
+REFRESH_COOKIE_NAME = "nepse_refresh"
+REFRESH_COOKIE_PATH = "/api/auth/"
+
+
+def _set_refresh_cookie(response, refresh_token):
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        max_age=int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="Lax",
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_refresh_cookie(response):
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+        samesite="Lax",
+    )
+
+
+class CsrfCookieView(APIView):
+    permission_classes = [AllowAny]
+
+    @method_decorator(ensure_csrf_cookie)
+    def get(self, _request):
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class JwtLoginView(TokenObtainPairView):
+    @method_decorator(csrf_protect)
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK:
+            refresh = response.data.pop("refresh")
+            _set_refresh_cookie(response, refresh)
+        return response
+
+
+class JwtRefreshView(TokenRefreshView):
+    @method_decorator(csrf_protect)
+    def post(self, request, *args, **kwargs):
+        token = request.COOKIES.get(REFRESH_COOKIE_NAME)
+        if not token:
+            raise ValidationError({"refresh": "A refresh cookie is required."})
+        serializer = TokenRefreshSerializer(data={"refresh": token})
+        serializer.is_valid(raise_exception=True)
+        response = Response(serializer.validated_data)
+        rotated_refresh = response.data.pop("refresh", None)
+        if rotated_refresh:
+            _set_refresh_cookie(response, rotated_refresh)
+        return response
 
 
 class CurrentUserView(APIView):
@@ -18,6 +91,46 @@ class CurrentUserView(APIView):
 
     def get(self, request):
         return Response(UserSummarySerializer(request.user).data)
+
+
+class RegistrationView(APIView):
+    permission_classes = [AllowAny]
+
+    @method_decorator(csrf_protect)
+    def post(self, request):
+        serializer = RegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response(
+            UserSummarySerializer(user).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @method_decorator(csrf_protect)
+    def post(self, request):
+        token_value = request.COOKIES.get(REFRESH_COOKIE_NAME)
+        if not token_value:
+            raise ValidationError({"refresh": "A refresh cookie is required."})
+        try:
+            token = RefreshToken(token_value)
+            token_user_id = token.get(
+                "user_id",
+                None,
+            )
+            if str(token_user_id) != str(request.user.pk):
+                raise ValidationError(
+                    {"refresh": "The refresh cookie does not belong to this user."}
+                )
+            token.blacklist()
+        except TokenError as exc:
+            raise ValidationError({"refresh": "The refresh cookie is invalid."}) from exc
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        _clear_refresh_cookie(response)
+        return response
 
 
 class WatchlistViewSet(viewsets.ModelViewSet):

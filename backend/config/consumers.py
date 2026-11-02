@@ -8,7 +8,7 @@ class UpdatesConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4401)
             return
         await self.channel_layer.group_add("updates", self.channel_name)
-        await self.accept()
+        await self.accept("nepse-insight")
 
     async def disconnect(self, close_code):
         if self.channel_layer is not None:

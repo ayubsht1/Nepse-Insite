@@ -22,8 +22,9 @@ class WebSocketTests(TransactionTestCase):
     async def _assert_receives_event(self, token):
         communicator = WebsocketCommunicator(
             application,
-            f"/ws/updates/?token={token}",
+            "/ws/updates/",
             headers=[(b"origin", b"http://localhost")],
+            subprotocols=["nepse-insight", f"nepse-insight.bearer.{token}"],
         )
         connected, _ = await communicator.connect()
         self.assertTrue(connected)
@@ -51,6 +52,7 @@ class WebSocketTests(TransactionTestCase):
             application,
             "/ws/updates/",
             headers=[(b"origin", b"http://localhost")],
+            subprotocols=["nepse-insight"],
         )
         connected, code = await communicator.connect()
         self.assertFalse(connected)
