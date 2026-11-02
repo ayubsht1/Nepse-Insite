@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, login, register } from '../../services/api';
-import { TrendingUp, User, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react';
+import { TrendingUp, User, Mail, Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function RegisterPage() {
@@ -14,6 +14,8 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -85,7 +87,7 @@ export default function RegisterPage() {
   };
 
   const getInputStyles = (field: string) => {
-    const baseStyles = "block w-full pl-10 pr-3 py-2.5 rounded-lg border bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 outline-none transition-all";
+    const baseStyles = "block w-full pl-10 pr-10 py-2.5 rounded-lg border bg-transparent text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 outline-none transition-all";
     const errorStyles = fieldErrors[field] 
       ? "border-rose-500 focus:ring-rose-500 dark:border-rose-500" 
       : "border-slate-300 dark:border-slate-700 focus:ring-emerald-500";
@@ -199,7 +201,7 @@ export default function RegisterPage() {
                     <Lock className="w-5 h-5" />
                   </div>
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
                     minLength={8}
                     required
@@ -211,6 +213,13 @@ export default function RegisterPage() {
                     placeholder="••••••••"
                     className={getInputStyles('password')}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
                 </div>
                 {renderError('password')}
               </div>
@@ -224,7 +233,7 @@ export default function RegisterPage() {
                     <Lock className="w-5 h-5" />
                   </div>
                   <input
-                    type="password"
+                    type={showConfirmPassword ? 'text' : 'password'}
                     autoComplete="new-password"
                     required
                     value={confirmPassword}
@@ -235,6 +244,13 @@ export default function RegisterPage() {
                     placeholder="••••••••"
                     className={getInputStyles('confirmPassword')}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
                 </div>
                 {renderError('confirmPassword')}
               </div>
