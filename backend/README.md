@@ -7,7 +7,8 @@ does not ship fabricated prices, floorsheets, articles, or analysis.
 
 - `apps/users`: Viewer/Analyst/Admin application roles and watchlists.
 - `apps/companies`: company directory and company-level prices/analysis APIs.
-- `apps/market_data`: OHLCV and transaction-level floorsheet storage/import.
+- `apps/market_data`: source-backed NEPSE Alpha, ShareSansar, and Merolagani
+  market snapshots, plus OHLCV and transaction-level floorsheet storage/import.
 - `apps/news`: articles, deterministic company tagging, corrections/history.
 - `apps/crawlers`: source configuration, HTTPX/BeautifulSoup crawler, Celery
   jobs and crawl-run records.
@@ -185,6 +186,7 @@ return standard DRF validation errors.
 | `GET` | `/api/companies/compare/?ids=1,2&range=30d` | Authenticated | Compare 2–10 companies. |
 | `GET` | `/api/market-data/prices/?company_id=1` | Authenticated | Paginated daily price rows. |
 | `GET` | `/api/market-data/floorsheet/?company_id=1` | Authenticated | Paginated transaction/broker rows. |
+| `GET` | `/api/market-data/analysis/` | Authenticated | Latest sourced market summary, index history, indices/sectors, provider-specific stock quotes, leaders, and available technical indicators. |
 | `POST` | `/api/market-data/admin/prices/import/` | Admin | Import validated OHLCV; `(company,date)` upserts. |
 | `POST` | `/api/market-data/admin/floorsheet/import/` | Admin | Import transaction rows with deduplication by source record ID. |
 | `GET` | `/api/news/?company_id=1&search=...` | Authenticated | Paginated articles and multi-company tags. |
@@ -247,6 +249,37 @@ live article persistence is claimed. Import genuine OHLCV and floorsheet data
 only from verified, licensed providers. The seed command's demo records are
 fictional and separately marked. The frontend and APIs report unavailable
 genuine data rather than making it up.
+
+## Market collection
+
+Market-data collection is independent of the news crawler. It reads
+`https://www.nepsealpha.com/live/stocks` for index/sector values, stock market
+rows, breadth, turnover, leaders, and intraday NEPSE index points, and
+`https://www.nepsealpha.com/trading-ta?frame=1D&symbol=NEPSE` for available
+technical indicators. It also reads ShareSansar's `/market` and
+`/today-share-price` pages for indices, market totals, and stock quotes, and
+Merolagani's `/LatestMarket.aspx` page for stock quotes and leaders. The JSON
+endpoints and HTML pages are public website resources, not documented or
+guaranteed APIs; terms and response formats may change. Collection checks each
+HTML provider's `robots.txt` before requesting its market pages.
+
+Celery Beat schedules collection every 15 minutes Sunday–Thursday from 11:00
+through 15:00 Asia/Kathmandu. Tasks avoid requests outside that window and the
+ShareSansar/Merolagani tasks also stop for the day after NEPSE Alpha reports the
+market closed. Technical indicators are retained across closed snapshots and
+fetched when needed. Snapshot uniqueness and timestamp uniqueness prevent
+duplicate daily/index-history records. The live endpoint currently provides
+intraday history; daily history accumulates from collected snapshots rather
+than being backfilled with invented values. The authenticated overview and
+market ticker show sourced index/sector data, quote rows, and last-updated time.
+
+The inspected Merolagani market page did not expose a populated index table, so
+its index, sector, and whole-market totals are not collected. Bizmandu is
+configured as a news source only; no structured public quote/index endpoint was
+confirmed. ShareSansar/Merolagani HTML parsing is limited to fields present in
+their market pages. Stock snapshots remain separate by provider and date; the
+overview presents each provider's latest quotes without merging conflicting
+prices.
 
 ## Market calculations and limits
 

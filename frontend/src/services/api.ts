@@ -168,6 +168,77 @@ export interface ApiCompanyBehavior {
   };
 }
 
+export interface ApiMarketLeader {
+  symbol: string;
+  name: string;
+  change_percent?: number | string | null;
+  turnover_crore?: number | string | null;
+}
+
+export interface ApiMarketSnapshot {
+  source: string;
+  date: string;
+  as_of: string;
+  market_open: boolean | null;
+  index_value: string | null;
+  index_change_percent: string | null;
+  previous_close: string | null;
+  turnover: string | null;
+  traded_volume: string | null;
+  transaction_count: number | null;
+  scrips_traded: number | null;
+  float_market_cap: string | null;
+  market_cap: string | null;
+  advancers: number | null;
+  decliners: number | null;
+  unchanged: number | null;
+  top_gainers: ApiMarketLeader[];
+  top_losers: ApiMarketLeader[];
+  top_traded: ApiMarketLeader[];
+  technical_indicators: Record<string, unknown>;
+  updated_at: string;
+}
+
+export interface ApiMarketIndex {
+  symbol: string;
+  name: string;
+  is_sector: boolean;
+  open_value: string | null;
+  high_value: string | null;
+  low_value: string | null;
+  close_value: string | null;
+  change_percent: string | null;
+  volume: string | null;
+  turnover: string | null;
+}
+
+export interface ApiMarketStock {
+  source: string;
+  date: string;
+  symbol: string;
+  instrument_type: string;
+  open_price: string | null;
+  high_price: string | null;
+  low_price: string | null;
+  close_price: string | null;
+  change_percent: string | null;
+  turnover: string | null;
+  volume: string | null;
+}
+
+export interface ApiMarketAnalysis {
+  snapshot: ApiMarketSnapshot | null;
+  history: Array<{
+    date: string;
+    value: string;
+    change_percent: string | null;
+  }>;
+  intraday: Array<{ observed_at: string; value: string }>;
+  sectors: ApiMarketIndex[];
+  indices: ApiMarketIndex[];
+  stocks: ApiMarketStock[];
+}
+
 export interface ApiError extends Error {
   status?: number;
   data?: unknown;
@@ -404,6 +475,11 @@ export async function fetchCompanyBehaviorSummary(
     `/companies/${companyId}/behavior-summary/`,
     { params: { range } },
   );
+  return data;
+}
+
+export async function fetchMarketAnalysis() {
+  const { data } = await apiClient.get<ApiMarketAnalysis>('/market-data/analysis/');
   return data;
 }
 

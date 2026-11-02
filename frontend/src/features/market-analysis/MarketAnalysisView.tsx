@@ -4,14 +4,38 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ApiCompany,
+  ApiMarketLeader,
+  ApiMarketAnalysis,
+  ApiMarketStock,
+  fetchMarketAnalysis,
   fetchCompanies,
   fetchCompanyBehaviorSummary,
 } from '../../services/api';
-import { EmptyState, LoadingState, PageHeader } from '../../components/ui';
-import { TrendingUp } from 'lucide-react';
+import {
+  ChartCard,
+  EmptyState,
+  LoadingState,
+  PageHeader,
+  StatCard,
+} from '../../components/ui';
+import { Activity, TrendingUp } from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 export const MarketAnalysisView: React.FC = () => {
   const [companyId, setCompanyId] = useState<number | null>(null);
+  const marketQuery = useQuery({
+    queryKey: ['market-analysis'],
+    queryFn: fetchMarketAnalysis,
+    refetchInterval: 5 * 60 * 1000,
+  });
   const companiesQuery = useQuery({
     queryKey: ['companies'],
     queryFn: () => fetchCompanies(),
@@ -29,9 +53,33 @@ export const MarketAnalysisView: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="Market Analysis"
-        description="VWAP uses stored transaction-level floorsheet data. Pressure is a close-location estimate, not actual buyer/seller volume. Volume anomalies require 20 prior trading records."
+        description="Market quotes and summaries from NEPSE Alpha, ShareSansar, and Merolagani. Technical indicators are shown when NEPSE Alpha provides them."
         icon={TrendingUp}
       />
+      {marketQuery.isLoading ? (
+        <LoadingState message="Loading NEPSE market data…" />
+      ) : marketQuery.isError ? (
+        <p role="alert" className="text-sm text-rose-600">
+          {marketQuery.error.message}
+        </p>
+      ) : marketQuery.data?.snapshot ? (
+        <NepseMarketOverview data={marketQuery.data} />
+      ) : (
+        <EmptyState
+          title="Market data is not available yet"
+          description="No configured provider has saved a market snapshot yet. Data will appear after the next successful collection."
+          icon={Activity}
+          className="max-w-none"
+        />
+      )}
+      {marketQuery.data?.stocks.length ? (
+        <MarketStockTable stocks={marketQuery.data.stocks} />
+      ) : marketQuery.isSuccess && marketQuery.data?.snapshot ? (
+        <EmptyState
+          title="No stock quotes are available"
+          description="The selected market sources have not returned stock quote rows."
+        />
+      ) : null}
       {companiesQuery.isLoading ? (
         <LoadingState message="Loading companies…" />
       ) : companiesQuery.isError ? (
@@ -132,6 +180,461 @@ export const MarketAnalysisView: React.FC = () => {
     </div>
   );
 };
+
+function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
+  const snapshot = data.snapshot;
+  if (!snapshot) return null;
+
+  const chartData = [
+    ...data.history.map((point) => ({
+      time: Date.parse(`${point.date}T00:00:00+05:45`),
+      value: Number(point.value),
+    })),
+    ...data.intraday.map((point) => ({
+      time: Date.parse(point.observed_at),
+      value: Number(point.value),
+    })),
+  ]
+    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value))
+    .sort((left, right) => left.time - right.time);
+  const marketStatus =
+    snapshot.market_open === null
+      ? 'Status unavailable'
+      : snapshot.market_open
+        ? 'Market open'
+        : 'Market closed';
+  const updatedAt = new Intl.DateTimeFormat('en-NP', {
+    timeZone: 'Asia/Kathmandu',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(snapshot.updated_at));
+  const technical = snapshot.technical_indicators;
+  const technicalSummary = asRecord(technical.summary);
+  const indicatorGroups = asRecord(technical.indicators);
+
+  return (
+    <section className="space-y-4" aria-label="NEPSE market overview">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">
+          NEPSE market overview · {snapshot.source}
+        </h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {marketStatus} · Updated {updatedAt} NPT
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="NEPSE Index"
+          value={formatMarketNumber(snapshot.index_value)}
+          change={
+            snapshot.index_change_percent === null
+              ? undefined
+              : Number(snapshot.index_change_percent)
+          }
+          subtext={
+            snapshot.previous_close === null
+              ? 'Previous close unavailable'
+              : `Previous close ${formatMarketNumber(snapshot.previous_close)}`
+          }
+        />
+        <StatCard
+          title="Market Turnover"
+          value={formatMarketNumber(snapshot.turnover, 0)}
+          subtext="NPR"
+        />
+        <StatCard
+          title="Shares Traded"
+          value={formatMarketNumber(snapshot.traded_volume, 0)}
+          subtext={
+            snapshot.transaction_count === null
+              ? 'Transaction count unavailable'
+              : `${snapshot.transaction_count.toLocaleString('en-IN')} transactions`
+          }
+        />
+        <StatCard
+          title="Market Breadth"
+          value={`${snapshot.advancers ?? '—'} / ${snapshot.decliners ?? '—'} / ${snapshot.unchanged ?? '—'}`}
+          subtext="Advancers / decliners / unchanged"
+        />
+      </div>
+
+      <ChartCard
+        title="NEPSE historical performance"
+        subtitle="Collected daily closes and provider-supplied intraday observations"
+        footer="Longer-term history will build as the collector records additional sessions."
+      >
+        {chartData.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="nepseIndexFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.28} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.45} />
+              <XAxis
+                dataKey="time"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
+                minTickGap={36}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(value: number) =>
+                  formatHistoryTick(value, snapshot.date)
+                }
+              />
+              <YAxis
+                domain={['auto', 'auto']}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(value: number) => formatMarketNumber(String(value))}
+                width={64}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#111827',
+                  borderColor: '#334155',
+                  color: '#e2e8f0',
+                }}
+                labelFormatter={(value) =>
+                  new Intl.DateTimeFormat('en-NP', {
+                    timeZone: 'Asia/Kathmandu',
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  }).format(new Date(Number(value)))
+                }
+                formatter={(value) => [formatMarketNumber(String(value)), 'NEPSE']}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                name="NEPSE"
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="url(#nepseIndexFill)"
+                isAnimationActive={false}
+                connectNulls
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState
+            title="Index history is unavailable"
+            description="The selected source has not supplied historical index points for this snapshot."
+            className="max-w-none"
+          />
+        )}
+      </ChartCard>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111827]">
+          <h3 className="mb-3 text-sm font-semibold">Indices and sector performance</h3>
+          {data.indices.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="pb-2 font-medium">Sector</th>
+                    <th className="pb-2 text-right font-medium">Index</th>
+                    <th className="pb-2 text-right font-medium">Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.indices.map((sector) => (
+                    <tr
+                      key={`${sector.symbol}-${sector.is_sector ? 'sector' : 'index'}`}
+                      className="border-t border-slate-100 dark:border-slate-800"
+                    >
+                      <td className="py-2">
+                        <span className="font-medium">{sector.name}</span>
+                        <span className="ml-2 text-xs text-slate-500">
+                          {sector.symbol}{sector.is_sector ? ' · Sector' : ''}
+                        </span>
+                      </td>
+                      <td className="py-2 text-right font-mono">
+                        {formatMarketNumber(sector.close_value)}
+                      </td>
+                      <td
+                        className={`py-2 text-right font-mono ${
+                          Number(sector.change_percent) > 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : Number(sector.change_percent) < 0
+                              ? 'text-rose-600 dark:text-rose-400'
+                              : 'text-slate-500'
+                        }`}
+                      >
+                        {formatPercentValue(sector.change_percent)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Index and sector data is unavailable.</p>
+          )}
+        </section>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111827]">
+          <h3 className="mb-3 text-sm font-semibold">Technical indicators</h3>
+          {Object.keys(technicalSummary).length || Object.keys(indicatorGroups).length ? (
+            <div className="space-y-3">
+              {Object.keys(technicalSummary).length > 0 && (
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {Object.entries(technicalSummary).map(([name, value]) => {
+                    const summary = asRecord(value);
+                    return (
+                      <div
+                        key={name}
+                        className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-900/70"
+                      >
+                        <span className="text-slate-500 dark:text-slate-400">
+                          {name.replace(/_/g, ' ')}
+                        </span>
+                        <p className="mt-1 font-semibold">
+                          {displayIndicator(summary.action ?? value)}
+                        </p>
+                        {summary.value !== undefined && (
+                          <p className="mt-1 font-mono text-slate-500">
+                            Score {displayIndicator(summary.value)}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {Object.entries(indicatorGroups).map(([group, values]) => (
+                <div key={group}>
+                  <h4 className="mb-1 text-xs font-semibold capitalize text-slate-500 dark:text-slate-400">
+                    {group.replace(/_/g, ' ')}
+                  </h4>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {indicatorEntries(values).map(([name, value]) => (
+                      <div
+                        key={name}
+                        className="rounded-lg bg-slate-50 p-2 text-xs dark:bg-slate-900/70"
+                      >
+                        <span className="text-slate-500 dark:text-slate-400">
+                          {name.replace(/_/g, ' ')}
+                        </span>
+                        <p className="mt-1 break-words font-medium">
+                          {displayIndicator(value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <details className="text-xs text-slate-500 dark:text-slate-400">
+                <summary className="cursor-pointer">View complete provider response</summary>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 dark:bg-slate-900">
+                  {JSON.stringify(technical, null, 2)}
+                </pre>
+              </details>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">
+              No technical indicators were returned with this provider's snapshot.
+            </p>
+          )}
+        </section>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <LeaderList
+          title="Top gainers"
+          leaders={snapshot.top_gainers}
+          valueKey="change_percent"
+          valueLabel="Change"
+        />
+        <LeaderList
+          title="Top losers"
+          leaders={snapshot.top_losers}
+          valueKey="change_percent"
+          valueLabel="Change"
+        />
+        <LeaderList
+          title="Top traded"
+          leaders={snapshot.top_traded}
+          valueKey="turnover_crore"
+          valueLabel="Turnover (Cr)"
+        />
+      </div>
+    </section>
+  );
+}
+
+function MarketStockTable({ stocks }: { stocks: ApiMarketStock[] }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111827]">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">Latest stock quotes</h2>
+        <p className="text-xs text-slate-500">
+          Per-provider latest snapshots · {stocks.length} rows
+        </p>
+      </div>
+      <div className="max-h-[32rem] overflow-auto">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+            <tr>
+              <th className="p-2 font-medium">Symbol</th>
+              <th className="p-2 font-medium">Source</th>
+              <th className="p-2 text-right font-medium">LTP</th>
+              <th className="p-2 text-right font-medium">Change</th>
+              <th className="p-2 text-right font-medium">Volume</th>
+              <th className="p-2 text-right font-medium">Turnover (NPR)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stocks.map((stock) => (
+              <tr
+                key={`${stock.source}-${stock.date}-${stock.symbol}`}
+                className="border-t border-slate-100 dark:border-slate-800"
+              >
+                <td className="p-2 font-mono font-semibold">{stock.symbol}</td>
+                <td className="p-2 text-xs text-slate-500">{stock.source}</td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.close_price)}
+                </td>
+                <td
+                  className={`p-2 text-right font-mono ${
+                    Number(stock.change_percent) > 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : Number(stock.change_percent) < 0
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-slate-500'
+                  }`}
+                >
+                  {formatPercentValue(stock.change_percent)}
+                </td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.volume, 0)}
+                </td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.turnover, 0)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function LeaderList({
+  title,
+  leaders,
+  valueKey,
+  valueLabel,
+}: {
+  title: string;
+  leaders: ApiMarketLeader[];
+  valueKey: 'change_percent' | 'turnover_crore';
+  valueLabel: string;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111827]">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      {leaders.length ? (
+        <ul className="space-y-2">
+          {leaders.map((leader) => (
+            <li
+              key={leader.symbol}
+              className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 first:border-0 first:pt-0 dark:border-slate-800"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{leader.symbol}</span>
+                <span className="block truncate text-xs text-slate-500">{leader.name}</span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-xs text-slate-500">{valueLabel}</span>
+                <span className="font-mono text-sm">
+                  {valueKey === 'change_percent'
+                    ? formatPercentValue(leader[valueKey])
+                    : formatMarketNumber(
+                        leader[valueKey] === undefined || leader[valueKey] === null
+                          ? null
+                          : String(leader[valueKey]),
+                      )}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-slate-500">Provider data is unavailable.</p>
+      )}
+    </section>
+  );
+}
+
+function formatMarketNumber(value: string | null, maximumFractionDigits = 2) {
+  if (value === null || !Number.isFinite(Number(value))) return '—';
+  return Number(value).toLocaleString('en-IN', { maximumFractionDigits });
+}
+
+function formatHistoryTick(value: number, snapshotDate: string) {
+  const date = new Date(value);
+  const datePart = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kathmandu',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  return datePart === snapshotDate
+    ? new Intl.DateTimeFormat('en-NP', {
+        timeZone: 'Asia/Kathmandu',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(date)
+    : new Intl.DateTimeFormat('en-NP', {
+        timeZone: 'Asia/Kathmandu',
+        month: 'short',
+        day: 'numeric',
+      }).format(date);
+}
+
+function formatPercentValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+    return '—';
+  }
+  const numeric = Number(value);
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(2)}%`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function displayIndicator(value: unknown) {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  const record = asRecord(value);
+  if ('value' in record || 'action' in record) {
+    return [record.value, record.action]
+      .filter((part) => part !== undefined && part !== null)
+      .map(String)
+      .join(' · ');
+  }
+  return JSON.stringify(value);
+}
+
+function indicatorEntries(value: unknown): Array<[string, unknown]> {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => {
+      const name = asRecord(item).name;
+      return [typeof name === 'string' ? name : String(index + 1), item];
+    });
+  }
+  return Object.entries(asRecord(value));
+}
 
 function AnalysisCard({
   title,

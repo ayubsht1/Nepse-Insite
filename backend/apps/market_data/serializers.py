@@ -3,7 +3,76 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from apps.companies.models import Company
-from .models import FloorsheetTransaction, StockPrice
+from .models import (
+    FloorsheetTransaction,
+    MarketIndexSnapshot,
+    MarketSnapshot,
+    MarketStockSnapshot,
+    StockPrice,
+)
+
+
+class MarketSnapshotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketSnapshot
+        fields = [
+            "source",
+            "date",
+            "as_of",
+            "market_open",
+            "index_value",
+            "index_change_percent",
+            "previous_close",
+            "turnover",
+            "traded_volume",
+            "transaction_count",
+            "scrips_traded",
+            "float_market_cap",
+            "market_cap",
+            "advancers",
+            "decliners",
+            "unchanged",
+            "top_gainers",
+            "top_losers",
+            "top_traded",
+            "technical_indicators",
+            "updated_at",
+        ]
+
+
+class MarketIndexSnapshotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketIndexSnapshot
+        fields = [
+            "symbol",
+            "name",
+            "is_sector",
+            "open_value",
+            "high_value",
+            "low_value",
+            "close_value",
+            "change_percent",
+            "volume",
+            "turnover",
+        ]
+
+
+class MarketStockSnapshotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MarketStockSnapshot
+        fields = [
+            "source",
+            "date",
+            "symbol",
+            "instrument_type",
+            "open_price",
+            "high_price",
+            "low_price",
+            "close_price",
+            "change_percent",
+            "turnover",
+            "volume",
+        ]
 
 
 class StockPriceSerializer(serializers.ModelSerializer):

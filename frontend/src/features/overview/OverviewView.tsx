@@ -3,7 +3,13 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useApp } from '../../context/AppContext';
-import { ApiCompany, ApiNewsArticle, fetchCompanies, fetchNews } from '../../services/api';
+import {
+  ApiCompany,
+  ApiNewsArticle,
+  fetchCompanies,
+  fetchMarketAnalysis,
+  fetchNews,
+} from '../../services/api';
 import {
   DataTable,
   EmptyState,
@@ -25,8 +31,13 @@ export const OverviewView: React.FC = () => {
     queryKey: ['news'],
     queryFn: () => fetchNews(),
   });
+  const marketQuery = useQuery({
+    queryKey: ['market-analysis'],
+    queryFn: fetchMarketAnalysis,
+  });
   const companies = companiesQuery.data?.results ?? [];
   const articles = newsQuery.data ?? [];
+  const marketSnapshot = marketQuery.data?.snapshot;
   const companyColumns: Column<ApiCompany>[] = [
     {
       key: 'symbol',
@@ -43,7 +54,7 @@ export const OverviewView: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="NEPSE Insight Dashboard"
-        description="Live company and collected-news records from the configured backend. This project has no exchange-index feed or seeded market prices."
+        description="Sourced market, company, and collected-news records from configured providers."
         badge={<StatusBadge label="Source-backed data only" variant="info" />}
         actions={
           <button
@@ -78,10 +89,29 @@ export const OverviewView: React.FC = () => {
         />
         <StatCard
           title="Market index"
-          value="Unavailable"
+          value={
+            marketQuery.isLoading
+              ? 'Loading'
+              : marketSnapshot?.index_value
+                ? Number(marketSnapshot.index_value).toLocaleString('en-IN', {
+                    maximumFractionDigits: 2,
+                  })
+                : 'Unavailable'
+          }
           icon={Activity}
           iconColor="text-amber-400"
-          subtext="No index-data provider is configured"
+          change={
+            marketSnapshot?.index_change_percent == null
+              ? undefined
+              : Number(marketSnapshot.index_change_percent)
+          }
+          subtext={
+            marketSnapshot
+              ? `${marketSnapshot.source} · ${marketSnapshot.date}`
+              : marketQuery.isError
+                ? marketQuery.error.message
+                : 'No sourced index snapshot yet'
+          }
         />
       </div>
 
