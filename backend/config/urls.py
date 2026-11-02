@@ -12,6 +12,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/admin/users/", include("apps.users.admin_urls")),
     path(
         "api/schema/",
         SpectacularAPIView.as_view(permission_classes=[AllowAny]),
@@ -38,5 +39,5 @@ urlpatterns = [
     path("api/market-data/", include("apps.market_data.urls")),
     path("api/news/", include("apps.news.urls")),
     path("api/analytics/", include("apps.analytics.urls")),
-    path("api/crawlers/", include("apps.crawlers.urls")),
+    path("api/admin/", include("apps.crawlers.urls")),
 ]

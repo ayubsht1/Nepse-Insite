@@ -1,14 +1,16 @@
 import os
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("SECRET_KEY", "unsafe-development-key")
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "unsafe-development-key-not-for-production-32bytes"
+)
 DEBUG = False
 ALLOWED_HOSTS = [
     host.strip()
@@ -78,6 +80,10 @@ else:
     database_url = urlparse(database_url_value)
 
 if database_url_value and database_url.scheme in {"postgres", "postgresql"}:
+    database_query = parse_qs(database_url.query)
+    database_options = {}
+    if "sslmode" in database_query:
+        database_options["sslmode"] = database_query["sslmode"][0]
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -87,6 +93,7 @@ if database_url_value and database_url.scheme in {"postgres", "postgresql"}:
             "HOST": database_url.hostname or "localhost",
             "PORT": database_url.port or 5432,
             "CONN_MAX_AGE": 60,
+            "OPTIONS": database_options,
         }
     }
 elif database_url_value and database_url.scheme == "sqlite":
@@ -142,6 +149,8 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 25,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -165,6 +174,17 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "celery.beat:PersistentScheduler"
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "crawl-enabled-news-sources-every-four-hours": {
+        "task": "apps.crawlers.tasks.crawl_enabled_sources",
+        "schedule": crontab(minute=0, hour="*/4"),
+    },
+}
+CRAWLER_USER_AGENT = os.getenv(
+    "CRAWLER_USER_AGENT", "NEPSEInsightBot/1.0 (+contact: configure CRAWLER_USER_AGENT)"
+)
 
 LOGGING = {
     "version": 1,
