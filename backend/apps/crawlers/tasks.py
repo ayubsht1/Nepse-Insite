@@ -25,6 +25,15 @@ def _publish_run(run):
     )
 
 
+def _mark_failed(run, error):
+    run.refresh_from_db()
+    run.status = CrawlRun.Status.FAILED
+    run.error_message = str(error)[:4000]
+    run.finished_at = timezone.now()
+    run.save(update_fields=["status", "error_message", "finished_at"])
+    _publish_run(run)
+
+
 @shared_task(
     bind=True,
     name="apps.crawlers.tasks.crawl_source",
@@ -106,27 +115,25 @@ def crawl_source(self, source_id, run_id=None):
         logger.warning("Crawl run %s skipped by robots.txt: %s", run.pk, exc)
         return {"run_id": run.pk, "status": run.status, "reason": str(exc)}
     except httpx.HTTPError as exc:
+        if (
+            isinstance(exc, httpx.HTTPStatusError)
+            and 400 <= exc.response.status_code < 500
+            and exc.response.status_code != 429
+        ):
+            _mark_failed(run, exc)
+            logger.error("Permanent HTTP error in crawl run %s", run.pk, exc_info=True)
+            raise
         logger.exception("Network failure in crawl run %s", run.pk)
         run.refresh_from_db()
         run.error_message = str(exc)[:4000]
         run.save(update_fields=["error_message"])
         if self.request.retries >= self.max_retries:
-            run.status = CrawlRun.Status.FAILED
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "finished_at"])
-            _publish_run(run)
+            _mark_failed(run, exc)
             raise
         raise self.retry(exc=exc)
     except Exception as exc:
         logger.exception("Crawl run %s failed for source %s", run.pk, source.key)
-        run.refresh_from_db()
-        run.status = CrawlRun.Status.FAILED
-        run.error_message = str(exc)[:4000]
-        run.finished_at = timezone.now()
-        run.save(
-            update_fields=["status", "error_message", "finished_at"]
-        )
-        _publish_run(run)
+        _mark_failed(run, exc)
         raise
     finally:
         client.close()

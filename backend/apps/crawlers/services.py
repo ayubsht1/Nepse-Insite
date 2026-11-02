@@ -21,6 +21,10 @@ class RobotsDenied(Exception):
     pass
 
 
+class NoArticlesDiscovered(Exception):
+    pass
+
+
 def _canonical_article_url(base_url, href):
     resolved = urljoin(base_url, href)
     parsed = urlparse(resolved)
@@ -119,6 +123,7 @@ def crawl_source(
     source, client=None, sleep=time.sleep, on_request=None, on_article=None
 ):
     requests_made = 0
+    last_request_at = None
     owns_client = client is None
     if client is None:
         client = httpx.Client(
@@ -128,14 +133,24 @@ def crawl_source(
         )
     user_agent = client.headers.get("User-Agent", "NEPSEInsightBot/1.0")
 
-    def get(url):
-        nonlocal requests_made
+    def get(url, minimum_interval=1):
+        nonlocal requests_made, last_request_at
+        if last_request_at is not None:
+            elapsed = time.monotonic() - last_request_at
+            if elapsed < minimum_interval:
+                sleep(minimum_interval - elapsed)
         requests_made += 1
         if on_request:
             on_request()
-        return client.get(url)
+        response = client.get(url)
+        last_request_at = time.monotonic()
+        return response
 
     try:
+        if not source.listing_url or not source.article_url_pattern:
+            raise ValueError(
+                f"Source {source.key} is missing a listing URL or article URL pattern."
+            )
         robots_url = urljoin(source.base_url, "/robots.txt")
         robots_response = get(robots_url)
         _validate_response_host(robots_response, source)
@@ -151,7 +166,11 @@ def crawl_source(
             raise RobotsDenied(
                 f"robots.txt disallows listing URL {source.listing_url}"
             )
-        listing_response = get(source.listing_url)
+        delay = max(1, source.request_interval_seconds)
+        robots_delay = robots.crawl_delay(user_agent)
+        if robots_delay is not None:
+            delay = max(delay, int(robots_delay))
+        listing_response = get(source.listing_url, minimum_interval=delay)
         _validate_response_host(listing_response, source)
         listing_response.raise_for_status()
 
@@ -182,27 +201,28 @@ def crawl_source(
                 if len(article_urls) >= source.max_articles_per_run:
                     break
 
-        delay = max(1, source.request_interval_seconds)
-        robots_delay = robots.crawl_delay(user_agent)
-        if robots_delay is not None:
-            delay = max(delay, int(robots_delay))
-        fetched = 0
+        if not article_urls:
+            raise NoArticlesDiscovered(
+                f"No article URLs matched the configured pattern for {source.key}."
+            )
+
+        articles_extracted = 0
+        article_urls_disallowed = 0
         for article_url in article_urls:
             if not robots.can_fetch(user_agent, article_url):
                 logger.info("Skipping robots-disallowed article URL: %s", article_url)
+                article_urls_disallowed += 1
                 continue
-            if fetched:
-                sleep(delay)
-            response = get(article_url)
+            response = get(article_url, minimum_interval=delay)
             _validate_response_host(response, source)
             response.raise_for_status()
-            fetched += 1
             data = _article_data(response.text, article_url)
             if not data["headline"]:
                 logger.info(
                     "Skipping article with no extractable headline: %s", article_url
                 )
                 continue
+            articles_extracted += 1
             article, was_created = NewsArticle.objects.get_or_create(
                 url=data["url"],
                 defaults={
@@ -220,8 +240,19 @@ def crawl_source(
                     "news.article.created",
                     {"article_id": article.pk, "headline": article.headline},
                 )
+        if articles_extracted == 0 and article_urls_disallowed == len(article_urls):
+            raise RobotsDenied(
+                f"robots.txt disallows every matching article URL for {source.key}."
+            )
+        if articles_extracted == 0:
+            raise NoArticlesDiscovered(
+                f"Found {len(article_urls)} candidate article URL(s) for "
+                f"{source.key}, but none had an extractable headline."
+            )
         return {
             "requests_made": requests_made,
+            "article_urls_found": len(article_urls),
+            "articles_extracted": articles_extracted,
         }
     finally:
         if owns_client:

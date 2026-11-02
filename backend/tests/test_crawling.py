@@ -2,7 +2,7 @@ import httpx
 from django.test import TestCase
 
 from apps.crawlers.models import CrawlSource
-from apps.crawlers.services import RobotsDenied, crawl_source
+from apps.crawlers.services import NoArticlesDiscovered, RobotsDenied, crawl_source
 from apps.news.models import NewsArticle, NewsCompanyTag
 from .factories import create_company
 
@@ -81,6 +81,75 @@ class CrawlerServiceTests(TestCase):
     def test_crawl_fails_closed_when_robots_disallows_listing(self):
         client = self.client_for("User-agent: *\nDisallow: /\n")
         with self.assertRaises(RobotsDenied):
+            crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+        self.assertFalse(NewsArticle.objects.exists())
+
+    def test_crawl_reports_robots_disallowed_article_pages_as_partial(self):
+        client = self.client_for(
+            "User-agent: *\nAllow: /news\nDisallow: /article/\n"
+        )
+        with self.assertRaisesRegex(
+            RobotsDenied, "disallows every matching article URL"
+        ):
+            crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+        self.assertFalse(NewsArticle.objects.exists())
+
+    def test_crawl_waits_between_robots_listing_and_article_requests(self):
+        self.source.request_interval_seconds = 500
+        self.source.save(update_fields=["request_interval_seconds"])
+        client = self.client_for()
+        delays = []
+
+        crawl_source(
+            self.source,
+            client=client,
+            sleep=delays.append,
+        )
+
+        client.close()
+        self.assertEqual(len(delays), 2)
+        self.assertTrue(all(delay >= 499 for delay in delays))
+
+    def test_crawl_reports_empty_listing_instead_of_success(self):
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    text="User-agent: *\nAllow: /\n"
+                    if request.url.path == "/robots.txt"
+                    else "<html><body>No stories listed</body></html>",
+                    request=request,
+                )
+            ),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+        with self.assertRaisesRegex(NoArticlesDiscovered, "No article URLs matched"):
+            crawl_source(self.source, client=client, sleep=lambda _: None)
+        client.close()
+        self.assertFalse(NewsArticle.objects.exists())
+
+    def test_crawl_reports_candidate_pages_without_headlines(self):
+        client = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    text=(
+                        "User-agent: *\nAllow: /\n"
+                        if request.url.path == "/robots.txt"
+                        else '<a href="/article/1">story</a>'
+                        if request.url.path == "/news"
+                        else "<html><body>Changed article layout</body></html>"
+                    ),
+                    request=request,
+                )
+            ),
+            headers={"User-Agent": "NEPSEInsightTest/1.0"},
+        )
+        with self.assertRaisesRegex(
+            NoArticlesDiscovered, "none had an extractable headline"
+        ):
             crawl_source(self.source, client=client, sleep=lambda _: None)
         client.close()
         self.assertFalse(NewsArticle.objects.exists())
