@@ -4,7 +4,12 @@ import axios, {
   InternalAxiosRequestConfig,
 } from 'axios';
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '/api').replace(/\/$/, '');
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'development'
+    ? 'http://localhost:8000/api'
+    : '/api')
+).replace(/\/$/, '');
 const ACCESS_TOKEN_KEY = 'auth_token';
 const LEGACY_REFRESH_TOKEN_KEY = 'refresh_token';
 
@@ -168,6 +173,34 @@ export interface ApiError extends Error {
   data?: unknown;
 }
 
+function getApiErrorMessage(data: unknown, fallback: string) {
+  if (!data || typeof data !== 'object') return fallback;
+  const fields = data as Record<string, unknown>;
+  const preferredMessages = ['detail', 'message', 'non_field_errors']
+    .flatMap((key) => {
+      const value = fields[key];
+      return typeof value === 'string'
+        ? [value]
+        : Array.isArray(value)
+          ? value.filter((message): message is string => typeof message === 'string')
+          : [];
+    });
+
+  if (preferredMessages.length) return preferredMessages.join(' ');
+
+  return Object.entries(fields)
+    .flatMap(([field, value]) => {
+      const messages =
+        typeof value === 'string'
+          ? [value]
+          : Array.isArray(value)
+            ? value.filter((message): message is string => typeof message === 'string')
+            : [];
+      return messages.map((message) => `${field}: ${message}`);
+    })
+    .join(' ') || fallback;
+}
+
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
@@ -243,11 +276,8 @@ apiClient.interceptors.response.use(
       }
     }
 
-    const data = error.response?.data as
-      | { detail?: string; message?: string }
-      | undefined;
     const apiError: ApiError = new Error(
-      data?.detail || data?.message || error.message,
+      getApiErrorMessage(error.response?.data, error.message),
     );
     apiError.status = error.response?.status;
     apiError.data = error.response?.data;
