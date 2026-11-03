@@ -5,6 +5,7 @@ from celery import shared_task
 from django.utils import timezone
 
 from apps.companies.models import Company
+from apps.companies.market_directory import sync_company_directory
 from .models import MarketSnapshot
 from .market_sources import (
     collect_merolagani_floorsheet_data as collect_merolagani_floorsheet,
@@ -138,3 +139,14 @@ def collect_sharesansar_company_history_data():
                 company.symbol,
             )
     return {"companies": len(results), "failed": failed, "results": results}
+
+
+@shared_task
+def sync_sharesansar_company_directory():
+    try:
+        result = sync_company_directory(target=10)
+    except (httpx.HTTPError, MarketDataProviderError):
+        logger.exception("ShareSansar company-directory sync failed")
+        raise
+    logger.info("ShareSansar company-directory sync: %s", result)
+    return result

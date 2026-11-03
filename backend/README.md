@@ -119,6 +119,15 @@ Do not run the seed against production. The development-only guard is not a
 substitute for checking the selected database before running management
 commands.
 
+## Listed company directory
+
+The `sync_companies` command adds real company names, symbols, and sectors from
+ShareSansar's public company list until the active directory reaches the target
+(10 by default). It does not create prices or floorsheet transactions. Run it
+manually with `python manage.py sync_companies --target 10`; Celery Beat also
+checks the target after market close. This public page is not a documented API;
+review its terms and robots directives before production use.
+
 ## Environment and deployment
 
 Copy `backend\.env.example` to `backend\.env`.

@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from apps.companies.models import Company
+from apps.companies.market_directory import sync_company_directory
 from apps.market_data.models import (
     FloorsheetTransaction,
     MarketIndexHistory,
@@ -27,6 +28,7 @@ from apps.market_data.tasks import (
     collect_sharesansar_market_data,
 )
 from apps.market_data.market_sources import (
+    _parse_sharesansar_company_directory,
     _parse_sharesansar_company_floorsheet,
     _parse_sharesansar_company_prices,
     _parse_merolagani_floorsheet,
@@ -277,6 +279,28 @@ class MarketSourceParserTests(TestCase):
         self.assertEqual(parsed[0]["close"], Decimal("551.00"))
         self.assertEqual(parsed[0]["volume"], Decimal("98981.00"))
 
+    def test_share_sansar_company_directory_parser_reads_real_company_fields(self):
+        parsed = _parse_sharesansar_company_directory(
+            [
+                {
+                    "symbol": "<a title='ABC Bank' href='/company/abc'>abc</a>",
+                    "companyname": "<a href='/company/abc'>ABC Bank Limited</a>",
+                }
+            ],
+            "Commercial Bank",
+        )
+
+        self.assertEqual(
+            parsed,
+            [
+                {
+                    "symbol": "ABC",
+                    "name": "ABC Bank Limited",
+                    "sector": "Commercial Bank",
+                }
+            ],
+        )
+
     def test_share_sansar_company_floorsheet_parser_maps_actual_contracts(self):
         parsed = _parse_sharesansar_company_floorsheet(
             [
@@ -440,6 +464,7 @@ class CompanyPricePersistenceTests(TestCase):
             StockPrice.objects.get(company=self.company, date=self.date).updated_at
         )
 
+
     def test_company_creation_backfills_matching_market_quotes(self):
         for source, close in (
             ("sharesansar", Decimal("10.5")),
@@ -462,6 +487,26 @@ class CompanyPricePersistenceTests(TestCase):
         price = StockPrice.objects.get(company=company, date=self.date)
         self.assertEqual(price.source, "nepsealpha")
         self.assertEqual(price.close_price, Decimal("11.0000"))
+
+
+class CompanyDirectorySyncTests(TestCase):
+    @patch("apps.companies.market_directory.collect_sharesansar_company_directory")
+    def test_sync_adds_only_real_directory_fields_until_target(self, collect_mock):
+        Company.objects.create(symbol="KEEP", name="Existing Company")
+        collect_mock.return_value = [
+            {"symbol": "KEEP", "name": "Existing Company", "sector": "Other"},
+            {"symbol": "ABC", "name": "ABC Bank Limited", "sector": "Banking"},
+            {"symbol": "XYZ", "name": "XYZ Hydro Limited", "sector": "Hydropower"},
+        ]
+
+        result = sync_company_directory(target=3)
+
+        self.assertEqual(result, {"created": 2, "active": 3, "target": 3})
+        self.assertEqual(StockPrice.objects.count(), 0)
+        self.assertEqual(
+            Company.objects.get(symbol="XYZ").sector,
+            "Hydropower",
+        )
 
 
 class MarketOverviewApiTests(APITestCase):

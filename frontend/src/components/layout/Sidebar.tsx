@@ -59,7 +59,6 @@ export const Sidebar: React.FC = () => {
   const onLogoutClick = async () => {
     try {
       await handleLogout();
-      toast.info('Logged out');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to log out.');
     }

@@ -22,6 +22,7 @@ SHARESANSAR = "sharesansar"
 MEROLAGANI = "merolagani"
 SHARESANSAR_BASE = "https://www.sharesansar.com"
 MEROLAGANI_BASE = "https://merolagani.com"
+SHARESANSAR_COMPANY_LIST_URL = f"{SHARESANSAR_BASE}/company-list"
 SHARESANSAR_INDEX_HISTORY_URL = f"{SHARESANSAR_BASE}/index-history-data"
 SHARESANSAR_COMPANY_PRICE_HISTORY_URL = f"{SHARESANSAR_BASE}/company-price-history"
 SHARESANSAR_COMPANY_FLOORSHEET_URL = f"{SHARESANSAR_BASE}/company-floor-sheet"
@@ -61,6 +62,20 @@ COMPANY_FLOORSHEET_COLUMNS = (
     ("rate", True, False),
     ("amount", False, False),
     ("date_", True, False),
+)
+COMPANY_DIRECTORY_COLUMNS = (
+    ("DT_Row_Index", False, False),
+    ("symbol", True, True),
+    ("companyname", True, True),
+    ("shares", False, True),
+    ("prom_share", False, True),
+    ("public_share", False, True),
+    ("paidup", False, True),
+    ("paidupcap", False, True),
+    ("marketcap", False, True),
+    ("listing_date", False, True),
+    ("ltp", False, True),
+    ("date", False, True),
 )
 
 
@@ -284,6 +299,106 @@ def collect_sharesansar_index_history():
             )
     logger.info("Saved %s ShareSansar historical NEPSE index records", len(parsed))
     return {"source": SHARESANSAR, "records": len(parsed)}
+
+
+def collect_sharesansar_company_directory(limit=10):
+    if limit < 1:
+        raise ValueError("Company directory limit must be positive.")
+
+    headers = {
+        "User-Agent": getattr(settings, "CRAWLER_USER_AGENT", "NEPSEInsight/1.0"),
+        "Accept": "text/html",
+    }
+    with httpx.Client(
+        timeout=REQUEST_TIMEOUT,
+        headers=headers,
+        follow_redirects=True,
+    ) as client:
+        robots = _robots_parser(client, SHARESANSAR_BASE)
+        html = _get_html(
+            client,
+            SHARESANSAR_COMPANY_LIST_URL,
+            SHARESANSAR_BASE,
+            robot_parser=robots,
+        )
+        sector_select = BeautifulSoup(html, "html.parser").select_one("select#sector")
+        if sector_select is None:
+            raise MarketDataProviderError(
+                "ShareSansar company list has no sector selector."
+            )
+        sectors = [
+            (option.get("value", "").strip(), option.get_text(" ", strip=True))
+            for option in sector_select.select("option")
+            if option.get("value")
+        ]
+        companies = []
+        seen_symbols = set()
+        for sector_id, sector_name in sectors:
+            if _is_non_company_sector(sector_name):
+                continue
+            start = 0
+            draw = 1
+            total = None
+            while total is None or start < total:
+                params = _datatable_params(
+                    COMPANY_DIRECTORY_COLUMNS,
+                    draw=draw,
+                    start=start,
+                    length=min(FLOORSHEET_PAGE_SIZE, limit - len(companies)),
+                )
+                params["sector"] = sector_id
+                response = client.get(
+                    SHARESANSAR_COMPANY_LIST_URL,
+                    params=params,
+                    headers={
+                        "Referer": SHARESANSAR_COMPANY_LIST_URL,
+                        "Accept": "application/json, text/html",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                )
+                response.raise_for_status()
+                _validate_source_response(response, SHARESANSAR_BASE)
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    raise MarketDataProviderError(
+                        "ShareSansar company list returned invalid JSON."
+                    ) from exc
+                if not isinstance(payload, dict) or not isinstance(
+                    payload.get("data"), list
+                ):
+                    raise MarketDataProviderError(
+                        "ShareSansar company list returned an unexpected response."
+                    )
+                total = payload.get(
+                    "recordsFiltered", payload.get("recordsTotal", 0)
+                )
+                if not isinstance(total, int) or total < 0:
+                    raise MarketDataProviderError(
+                        "ShareSansar company list returned an invalid record count."
+                    )
+                for company in _parse_sharesansar_company_directory(
+                    payload["data"], sector_name
+                ):
+                    if company["symbol"] in seen_symbols:
+                        continue
+                    seen_symbols.add(company["symbol"])
+                    companies.append(company)
+                    if len(companies) >= limit:
+                        return companies
+                page_count = len(payload["data"])
+                if not page_count:
+                    break
+                start += page_count
+                draw += 1
+                if start < total:
+                    time.sleep(0.25)
+
+    if not companies:
+        raise MarketDataProviderError(
+            "ShareSansar did not return any listed company records."
+        )
+    return companies
 
 
 def collect_sharesansar_company_history(company):
@@ -641,6 +756,36 @@ def _normalize(value):
 
 def _text(element):
     return element.get_text(strip=True) if element else ""
+
+
+def _is_non_company_sector(value):
+    normalized = value.lower()
+    return any(
+        category in normalized
+        for category in (
+            "bond",
+            "debenture",
+            "mutual fund",
+            "promoter share",
+            "preference share",
+        )
+    )
+
+
+def _parse_sharesansar_company_directory(rows, sector):
+    companies = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = _text(BeautifulSoup(str(row.get("symbol") or ""), "html.parser"))
+        name = _text(
+            BeautifulSoup(str(row.get("companyname") or ""), "html.parser")
+        )
+        symbol = symbol.strip().upper()
+        if not symbol or not name:
+            continue
+        companies.append({"symbol": symbol, "name": name, "sector": sector})
+    return companies
 
 
 def _number(value):

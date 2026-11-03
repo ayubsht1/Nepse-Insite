@@ -213,6 +213,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.market_data.tasks.collect_sharesansar_index_history_data",
         "schedule": crontab(minute=15, hour=15, day_of_week="sun-thu"),
     },
+    "sync-sharesansar-company-directory-after-market": {
+        "task": "apps.market_data.tasks.sync_sharesansar_company_directory",
+        "schedule": crontab(minute=5, hour=15, day_of_week="sun-thu"),
+    },
     "collect-sharesansar-company-history-after-market": {
         "task": "apps.market_data.tasks.collect_sharesansar_company_history_data",
         "schedule": crontab(minute=45, hour=15, day_of_week="sun-thu"),
