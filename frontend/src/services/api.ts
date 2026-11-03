@@ -50,8 +50,26 @@ export interface ApiStockPrice {
   high_price: string;
   low_price: string;
   close_price: string;
+  change_amount: string | null;
+  change_percent: string | null;
   volume: number;
   source: string;
+  updated_at: string;
+}
+
+export interface ApiFloorsheetTransaction {
+  id: number;
+  company: number;
+  symbol: string;
+  trade_date: string;
+  trade_time: string | null;
+  transaction_id: string;
+  price: string;
+  quantity: number;
+  buyer_broker: string;
+  seller_broker: string;
+  source: string;
+  source_record_id: string;
 }
 
 export interface ApiNewsTag {
@@ -221,6 +239,7 @@ export interface ApiMarketStock {
   high_price: string | null;
   low_price: string | null;
   close_price: string | null;
+  change_amount: string | null;
   change_percent: string | null;
   turnover: string | null;
   volume: string | null;
@@ -233,11 +252,29 @@ export interface ApiMarketAnalysis {
     value: string;
     change_percent: string | null;
   }>;
+  history_period: {
+    requested_range: string;
+    from: string | null;
+    to: string | null;
+    available_from: string | null;
+    available_to: string | null;
+    change_percent: string | null;
+    updated_at: string | null;
+  };
   intraday: Array<{ observed_at: string; value: string }>;
   sectors: ApiMarketIndex[];
   indices: ApiMarketIndex[];
   stocks: ApiMarketStock[];
 }
+
+export type ApiMarketHistoryRange =
+  | '7d'
+  | '15d'
+  | '30d'
+  | '90d'
+  | '180d'
+  | '1y'
+  | 'all';
 
 export interface ApiError extends Error {
   status?: number;
@@ -432,9 +469,15 @@ export async function fetchCompanies(params: {
 
 export async function fetchCompanyPrices(
   companyId: number,
-  range: '7d' | '15d' | '30d' = '30d',
+  range: ApiMarketHistoryRange = '30d',
 ) {
   return getResults<ApiStockPrice>(`/companies/${companyId}/prices/`, { range });
+}
+
+export async function fetchCompanyFloorsheet(companyId: number) {
+  return getResults<ApiFloorsheetTransaction>('/market-data/floorsheet/', {
+    company_id: companyId,
+  });
 }
 
 export async function fetchNews(params: {
@@ -469,7 +512,7 @@ export async function recategorizeNews(
 
 export async function fetchCompanyBehaviorSummary(
   companyId: number,
-  range: '7d' | '15d' | '30d' = '30d',
+  range: ApiMarketHistoryRange = '30d',
 ) {
   const { data } = await apiClient.get<ApiCompanyBehavior>(
     `/companies/${companyId}/behavior-summary/`,
@@ -478,8 +521,10 @@ export async function fetchCompanyBehaviorSummary(
   return data;
 }
 
-export async function fetchMarketAnalysis() {
-  const { data } = await apiClient.get<ApiMarketAnalysis>('/market-data/analysis/');
+export async function fetchMarketAnalysis(range: string = '30d') {
+  const { data } = await apiClient.get<ApiMarketAnalysis>('/market-data/analysis/', {
+    params: { range },
+  });
   return data;
 }
 

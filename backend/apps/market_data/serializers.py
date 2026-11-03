@@ -69,6 +69,7 @@ class MarketStockSnapshotSerializer(serializers.ModelSerializer):
             "high_price",
             "low_price",
             "close_price",
+            "change_amount",
             "change_percent",
             "turnover",
             "volume",
@@ -89,8 +90,11 @@ class StockPriceSerializer(serializers.ModelSerializer):
             "high_price",
             "low_price",
             "close_price",
+            "change_amount",
+            "change_percent",
             "volume",
             "source",
+            "updated_at",
         ]
         read_only_fields = ["id"]
 
@@ -143,6 +147,12 @@ class PriceImportRowSerializer(serializers.Serializer):
     high_price = serializers.DecimalField(max_digits=16, decimal_places=4)
     low_price = serializers.DecimalField(max_digits=16, decimal_places=4)
     close_price = serializers.DecimalField(max_digits=16, decimal_places=4)
+    change_amount = serializers.DecimalField(
+        max_digits=16, decimal_places=4, required=False, allow_null=True
+    )
+    change_percent = serializers.DecimalField(
+        max_digits=10, decimal_places=4, required=False, allow_null=True
+    )
     volume = serializers.IntegerField(min_value=0)
 
     def validate(self, attrs):

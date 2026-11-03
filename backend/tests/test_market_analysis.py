@@ -48,6 +48,21 @@ class MarketAnalysisTests(TestCase):
         self.assertEqual(result["value"], "11.3333")
         self.assertEqual(result["transactions"], 2)
 
+    def test_merolagani_vwap_reports_source_pagination_limit(self):
+        FloorsheetTransaction.objects.create(
+            company=self.company,
+            trade_date=self.today,
+            price=Decimal("10"),
+            quantity=5,
+            source="merolagani",
+            source_record_id="merolagani-record",
+        )
+
+        result = calculate_vwap(self.company, self.today, self.today)
+
+        self.assertTrue(result["available"])
+        self.assertIn("pagination may limit coverage", result["limitation"])
+
     def test_close_location_pressure_is_bounded_and_labeled_as_estimated(self):
         price = StockPrice(
             company=self.company,

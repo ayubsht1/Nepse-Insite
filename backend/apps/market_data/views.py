@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.db.models import Case, F, IntegerField, Max, Q, Value, When
 from rest_framework import generics, serializers
@@ -7,6 +9,7 @@ from rest_framework.views import APIView
 
 from common.events import broadcast_on_commit
 from common.permissions import IsAdminRole
+from common.date_ranges import parse_date_range
 from .models import (
     MarketIndexHistory,
     MarketIndexSnapshot,
@@ -24,6 +27,74 @@ from .serializers import (
     PriceImportSerializer,
     StockPriceSerializer,
 )
+
+INDEX_SOURCE_PRIORITY = {
+    "nepsealpha": 0,
+    "sharesansar": 1,
+    "merolagani": 2,
+}
+
+
+def _daily_nepse_history(end_date):
+    history_by_date = {}
+    source_filter = list(INDEX_SOURCE_PRIORITY)
+    for row in MarketIndexSnapshot.objects.filter(
+        source__in=source_filter,
+        symbol="NEPSE",
+        close_value__isnull=False,
+        date__lte=end_date,
+    ).order_by("date", "updated_at"):
+        candidate = {
+            "date": row.date,
+            "value": row.close_value,
+            "change_percent": row.change_percent,
+            "updated_at": row.updated_at,
+            "source": row.source,
+        }
+        existing = history_by_date.get(row.date)
+        if existing is None or INDEX_SOURCE_PRIORITY[row.source] < INDEX_SOURCE_PRIORITY[
+            existing["source"]
+        ]:
+            history_by_date[row.date] = candidate
+
+    for row in MarketSnapshot.objects.filter(
+        source__in=source_filter,
+        index_value__isnull=False,
+        date__lte=end_date,
+    ).order_by("date", "updated_at"):
+        candidate = {
+            "date": row.date,
+            "value": row.index_value,
+            "change_percent": row.index_change_percent,
+            "updated_at": row.updated_at,
+            "source": row.source,
+        }
+        existing = history_by_date.get(row.date)
+        if existing is None or INDEX_SOURCE_PRIORITY[row.source] <= INDEX_SOURCE_PRIORITY[
+            existing["source"]
+        ]:
+            history_by_date[row.date] = candidate
+
+    points = []
+    previous_value = None
+    for row in sorted(history_by_date.values(), key=lambda item: item["date"]):
+        change_percent = row["change_percent"]
+        if change_percent is None and previous_value:
+            change_percent = (
+                (row["value"] - previous_value)
+                / previous_value
+                * Decimal("100")
+            ).quantize(Decimal("0.0001"))
+        points.append(
+            {
+                "date": row["date"],
+                "value": row["value"],
+                "change_percent": change_percent,
+                "updated_at": row["updated_at"],
+            }
+        )
+        previous_value = row["value"]
+    return points
 
 
 class StockPriceListView(generics.ListAPIView):
@@ -51,6 +122,7 @@ class MarketAnalysisOverviewView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        start_date, end_date = parse_date_range(request)
         stock_dates = MarketStockSnapshot.objects.filter(
             source__in=["nepsealpha", "sharesansar", "merolagani"]
         ).values("source").annotate(latest_date=Max("date"))
@@ -79,11 +151,53 @@ class MarketAnalysisOverviewView(APIView):
             )
             .first()
         )
+        all_history = _daily_nepse_history(end_date)
+        history = [
+            point
+            for point in all_history
+            if start_date is None or point["date"] >= start_date
+        ]
+        first_value = history[0]["value"] if history else None
+        last_value = history[-1]["value"] if history else None
+        history_change_percent = (
+            (
+                (last_value - first_value)
+                / first_value
+                * Decimal("100")
+            ).quantize(Decimal("0.01"))
+            if first_value and last_value is not None
+            else None
+        )
+        history_period = {
+            "requested_range": request.query_params.get("range", "30d"),
+            "from": history[0]["date"] if history else None,
+            "to": history[-1]["date"] if history else None,
+            "available_from": all_history[0]["date"] if all_history else None,
+            "available_to": all_history[-1]["date"] if all_history else None,
+            "change_percent": (
+                str(history_change_percent)
+                if history_change_percent is not None
+                else None
+            ),
+            "updated_at": (
+                max(point["updated_at"] for point in history)
+                if history
+                else None
+            ),
+        }
         if snapshot is None:
             return Response(
                 {
                     "snapshot": None,
-                    "history": [],
+                    "history": [
+                        {
+                            "date": point["date"],
+                            "value": point["value"],
+                            "change_percent": point["change_percent"],
+                        }
+                        for point in history
+                    ],
+                    "history_period": history_period,
                     "intraday": [],
                     "sectors": [],
                     "indices": [],
@@ -102,21 +216,6 @@ class MarketAnalysisOverviewView(APIView):
             .order_by("observed_at")
             .values("observed_at", "value")[:6000]
         )
-        history_date_filter = (
-            {"date__lt": snapshot.date}
-            if intraday
-            else {"date__lte": snapshot.date}
-        )
-        daily_history = list(
-            MarketSnapshot.objects.filter(
-                source=snapshot.source,
-                index_value__isnull=False,
-                **history_date_filter,
-            )
-            .order_by("-date")
-            .values("date", "index_value", "index_change_percent")[:365]
-        )
-        daily_history.reverse()
         sectors = MarketIndexSnapshot.objects.filter(
             source=snapshot.source,
             date=snapshot.date,
@@ -132,11 +231,12 @@ class MarketAnalysisOverviewView(APIView):
                 "history": [
                     {
                         "date": point["date"],
-                        "value": point["index_value"],
-                        "change_percent": point["index_change_percent"],
+                        "value": point["value"],
+                        "change_percent": point["change_percent"],
                     }
-                    for point in daily_history
+                    for point in history
                 ],
+                "history_period": history_period,
                 "intraday": intraday,
                 "sectors": MarketIndexSnapshotSerializer(sectors, many=True).data,
                 "indices": MarketIndexSnapshotSerializer(indices, many=True).data,

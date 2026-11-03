@@ -29,12 +29,18 @@ def calculate_vwap(company, start_date, end_date):
         (row.price * row.quantity for row in transactions.iterator()),
         Decimal("0"),
     )
+    has_paginated_source = transactions.filter(source="merolagani").exists()
     return {
         "available": True,
         "value": str((turnover / quantity).quantize(Decimal("0.0001"))),
         "method": "floorsheet_weighted_average",
         "transactions": transactions.count(),
-        "limitation": None,
+        "limitation": (
+            "Merolagani floorsheet pagination may limit coverage; this value uses "
+            "the transactions currently stored."
+            if has_paginated_source
+            else None
+        ),
     }
 
 

@@ -422,6 +422,9 @@ def _save_snapshot(data):
             },
         )
 
+        index_rows = {
+            row["symbol"]: row for row in data["indices"] if row.get("symbol")
+        }
         indices = [
             MarketIndexSnapshot(
                 source=source,
@@ -436,8 +439,9 @@ def _save_snapshot(data):
                 change_percent=row["change_percent"],
                 volume=row["volume"],
                 turnover=row["turnover"],
+                updated_at=timezone.now(),
             )
-            for row in data["indices"]
+            for row in index_rows.values()
         ]
         if indices:
             MarketIndexSnapshot.objects.bulk_create(
@@ -454,9 +458,15 @@ def _save_snapshot(data):
                     "change_percent",
                     "volume",
                     "turnover",
+                    "updated_at",
                 ],
             )
 
+        stock_rows = {
+            str(row["symbol"]).strip().upper(): row
+            for row in data["stocks"]
+            if row.get("symbol")
+        }
         stocks = [
             MarketStockSnapshot(
                 source=source,
@@ -467,11 +477,12 @@ def _save_snapshot(data):
                 high_price=row["high"],
                 low_price=row["low"],
                 close_price=row["close"],
+                change_amount=row.get("change_amount"),
                 change_percent=row["change_percent"],
                 turnover=row["turnover"],
                 volume=row["volume"],
             )
-            for row in data["stocks"]
+            for row in stock_rows.values()
         ]
         if stocks:
             MarketStockSnapshot.objects.bulk_create(
@@ -484,11 +495,26 @@ def _save_snapshot(data):
                     "high_price",
                     "low_price",
                     "close_price",
+                    "change_amount",
                     "change_percent",
                     "turnover",
                     "volume",
                 ],
             )
+        from .services import persist_company_prices
+
+        price_result = persist_company_prices(source, date, list(stock_rows.values()))
+        logger.info(
+            "Synced %s company prices from %s for %s: %s created, %s updated, "
+            "%s unmatched, %s invalid",
+            len(stock_rows),
+            source,
+            date,
+            price_result["created"],
+            price_result["updated"],
+            price_result["unmatched"],
+            price_result["invalid"],
+        )
 
         latest_history_at = (
             MarketIndexHistory.objects.filter(source=source, symbol="NEPSE")
@@ -501,6 +527,9 @@ def _save_snapshot(data):
             if latest_history_at is not None
             else None
         )
+        history_by_time = {
+            point["observed_at"]: point for point in data["history"]
+        }
         history = [
             MarketIndexHistory(
                 source=source,
@@ -508,7 +537,7 @@ def _save_snapshot(data):
                 observed_at=point["observed_at"],
                 value=point["value"],
             )
-            for point in data["history"]
+            for point in history_by_time.values()
             if history_cutoff is None or point["observed_at"] >= history_cutoff
         ]
         if history:

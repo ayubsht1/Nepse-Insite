@@ -2,11 +2,27 @@
 
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ApiCompany, fetchCompanies, fetchCompanyBehaviorSummary, fetchCompanyPrices } from '../../services/api';
+import {
+  ApiCompany,
+  ApiMarketHistoryRange,
+  fetchCompanies,
+  fetchCompanyBehaviorSummary,
+  fetchCompanyFloorsheet,
+  fetchCompanyPrices,
+} from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { DataTable, EmptyState, LoadingState, PageHeader } from '../../components/ui';
 import { Column } from '../../components/ui/DataTable';
 import { Building2 } from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 export const CompaniesView: React.FC = () => {
   const { selectedCompanyId, setSelectedCompanyId } = useApp();
@@ -85,7 +101,7 @@ export const CompaniesView: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="NEPSE Companies"
-        description="Company records and trading data returned by the backend. Prices and analytics remain unavailable until verified records are imported."
+        description="Company prices and analytics update automatically from available NEPSE market feeds. Missing provider data is shown as unavailable."
         icon={Building2}
         badge={
           result && (
@@ -179,7 +195,7 @@ function CompanyMarketData({
   company: ApiCompany;
   onClose: () => void;
 }) {
-  const [range, setRange] = useState<'7d' | '15d' | '30d'>('30d');
+  const [range, setRange] = useState<ApiMarketHistoryRange>('30d');
   const pricesQuery = useQuery({
     queryKey: ['company-prices', company.id, range],
     queryFn: () => fetchCompanyPrices(company.id, range),
@@ -188,7 +204,28 @@ function CompanyMarketData({
     queryKey: ['company-behavior', company.id, range],
     queryFn: () => fetchCompanyBehaviorSummary(company.id, range),
   });
+  const floorsheetQuery = useQuery({
+    queryKey: ['company-floorsheet', company.id],
+    queryFn: () => fetchCompanyFloorsheet(company.id),
+  });
   const behavior = behaviorQuery.data;
+  const prices = pricesQuery.data ?? [];
+  const history = [...prices].sort((first, second) => first.date.localeCompare(second.date));
+  const chartData = history.map((price) => ({
+    date: price.date,
+    close: Number(price.close_price),
+  }));
+  const lastUpdated = prices.reduce(
+    (latest, price) => (price.updated_at > latest ? price.updated_at : latest),
+    '',
+  );
+  const formattedLastUpdated = lastUpdated
+    ? new Intl.DateTimeFormat('en-NP', {
+        timeZone: 'Asia/Kathmandu',
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(lastUpdated))
+    : 'Unavailable';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -203,15 +240,17 @@ function CompanyMarketData({
           <div className="flex items-center gap-2">
             <select
               value={range}
-              onChange={(event) =>
-                setRange(event.target.value as '7d' | '15d' | '30d')
-              }
+              onChange={(event) => setRange(event.target.value as ApiMarketHistoryRange)}
               className="rounded border border-slate-300 bg-transparent px-2 py-1 text-sm dark:border-slate-700"
               aria-label="Price date range"
             >
               <option value="7d">7 days</option>
               <option value="15d">15 days</option>
               <option value="30d">30 days</option>
+              <option value="90d">90 days</option>
+              <option value="180d">180 days</option>
+              <option value="1y">1 year</option>
+              <option value="all">All available</option>
             </select>
             <button onClick={onClose} className="text-sm text-slate-500">
               Close
@@ -273,48 +312,134 @@ function CompanyMarketData({
           </div>
         ) : null}
 
-        <h3 className="font-semibold">Historical OHLCV</h3>
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3 className="font-semibold">Historical OHLCV</h3>
+            <p className="text-xs text-slate-500">
+              Available data: {history[0]?.date ?? 'Unavailable'} –{' '}
+              {history[history.length - 1]?.date ?? 'Unavailable'}
+            </p>
+          </div>
+          <p className="text-xs text-slate-500">Updated {formattedLastUpdated} NPT</p>
+        </div>
         {pricesQuery.isLoading ? (
           <LoadingState message="Loading recorded prices…" />
         ) : pricesQuery.isError ? (
           <p role="alert" className="text-sm text-rose-600">
             {pricesQuery.error.message}
           </p>
-        ) : pricesQuery.data?.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700">
-                  {['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Source'].map(
-                    (heading) => (
-                      <th key={heading} className="px-2 py-2">
-                        {heading}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {pricesQuery.data.map((price) => (
-                  <tr key={price.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="px-2 py-2">{price.date}</td>
-                    <td className="px-2 py-2">{price.open_price}</td>
-                    <td className="px-2 py-2">{price.high_price}</td>
-                    <td className="px-2 py-2">{price.low_price}</td>
-                    <td className="px-2 py-2">{price.close_price}</td>
-                    <td className="px-2 py-2">{price.volume.toLocaleString()}</td>
-                    <td className="px-2 py-2">{price.source || 'Not recorded'}</td>
+        ) : history.length ? (
+          <>
+            <div className="h-56 w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.45} />
+                  <XAxis dataKey="date" minTickGap={28} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis domain={['auto', 'auto']} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#111827',
+                      borderColor: '#334155',
+                      color: '#e2e8f0',
+                    }}
+                    formatter={(value) => [String(value), 'Close']}
+                    labelFormatter={(value) => String(value)}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="close"
+                    name="Close"
+                    stroke="#10b981"
+                    fill="#10b981"
+                    fillOpacity={0.15}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700">
+                    {['Date', 'Open', 'High', 'Low', 'Close', 'Change %', 'Volume', 'Source'].map(
+                      (heading) => (
+                        <th key={heading} className="px-2 py-2">
+                          {heading}
+                        </th>
+                      ),
+                    )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {[...history].reverse().map((price) => (
+                    <tr key={price.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="px-2 py-2">{price.date}</td>
+                      <td className="px-2 py-2">{price.open_price}</td>
+                      <td className="px-2 py-2">{price.high_price}</td>
+                      <td className="px-2 py-2">{price.low_price}</td>
+                      <td className="px-2 py-2">{price.close_price}</td>
+                      <td className="px-2 py-2">
+                        {price.change_percent === null
+                          ? 'Unavailable'
+                          : `${price.change_percent}%`}
+                      </td>
+                      <td className="px-2 py-2">{price.volume.toLocaleString()}</td>
+                      <td className="px-2 py-2">{price.source || 'Not recorded'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <EmptyState
             title="No recorded prices"
             description="No OHLCV records are available for this company and date range. No values are estimated or substituted."
           />
         )}
+
+        <div>
+          <h3 className="font-semibold">Floorsheet transactions</h3>
+          {floorsheetQuery.isLoading ? (
+            <LoadingState message="Loading recorded transactions…" />
+          ) : floorsheetQuery.isError ? (
+            <p role="alert" className="text-sm text-rose-600">
+              {floorsheetQuery.error.message}
+            </p>
+          ) : floorsheetQuery.data?.length ? (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-700">
+                    {['Date', 'Contract', 'Buyer', 'Seller', 'Rate', 'Quantity', 'Source'].map(
+                      (heading) => (
+                        <th key={heading} className="px-2 py-2">{heading}</th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {floorsheetQuery.data.map((trade) => (
+                    <tr key={trade.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="px-2 py-2">{trade.trade_date}</td>
+                      <td className="px-2 py-2 font-mono">{trade.transaction_id || 'Unavailable'}</td>
+                      <td className="px-2 py-2">{trade.buyer_broker || 'Unavailable'}</td>
+                      <td className="px-2 py-2">{trade.seller_broker || 'Unavailable'}</td>
+                      <td className="px-2 py-2">{trade.price}</td>
+                      <td className="px-2 py-2">{trade.quantity.toLocaleString()}</td>
+                      <td className="px-2 py-2">{trade.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              title="No recorded floorsheet trades"
+              description="No transaction-level records are available for this company."
+            />
+          )}
+        </div>
       </section>
     </div>
   );

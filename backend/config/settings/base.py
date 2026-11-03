@@ -203,6 +203,20 @@ CELERY_BEAT_SCHEDULE = {
             minute="*/15", hour="11-15", day_of_week="sun-thu"
         ),
     },
+    "collect-merolagani-floorsheet-during-market-hours": {
+        "task": "apps.market_data.tasks.collect_merolagani_floorsheet_data",
+        "schedule": crontab(
+            minute="*/15", hour="11-15", day_of_week="sun-thu"
+        ),
+    },
+    "collect-sharesansar-historical-index-data-after-market": {
+        "task": "apps.market_data.tasks.collect_sharesansar_index_history_data",
+        "schedule": crontab(minute=15, hour=15, day_of_week="sun-thu"),
+    },
+    "collect-sharesansar-company-history-after-market": {
+        "task": "apps.market_data.tasks.collect_sharesansar_company_history_data",
+        "schedule": crontab(minute=45, hour=15, day_of_week="sun-thu"),
+    },
 }
 CRAWLER_USER_AGENT = os.getenv(
     "CRAWLER_USER_AGENT", "NEPSEInsightBot/1.0 (+contact: configure CRAWLER_USER_AGENT)"

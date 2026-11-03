@@ -33,7 +33,7 @@ export const OverviewView: React.FC = () => {
   });
   const marketQuery = useQuery({
     queryKey: ['market-analysis'],
-    queryFn: fetchMarketAnalysis,
+    queryFn: () => fetchMarketAnalysis(),
   });
   const companies = companiesQuery.data?.results ?? [];
   const articles = newsQuery.data ?? [];

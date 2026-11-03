@@ -7,7 +7,7 @@ import { fetchMarketAnalysis } from '../../services/api';
 export const MarketTickerBar: React.FC = () => {
   const marketQuery = useQuery({
     queryKey: ['market-analysis'],
-    queryFn: fetchMarketAnalysis,
+    queryFn: () => fetchMarketAnalysis(),
   });
   const snapshot = marketQuery.data?.snapshot;
   const updatedAt = snapshot

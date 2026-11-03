@@ -6,6 +6,7 @@ import {
   ApiCompany,
   ApiMarketLeader,
   ApiMarketAnalysis,
+  ApiMarketHistoryRange,
   ApiMarketStock,
   fetchMarketAnalysis,
   fetchCompanies,
@@ -31,9 +32,10 @@ import {
 
 export const MarketAnalysisView: React.FC = () => {
   const [companyId, setCompanyId] = useState<number | null>(null);
+  const [historyRange, setHistoryRange] = useState<ApiMarketHistoryRange>('30d');
   const marketQuery = useQuery({
-    queryKey: ['market-analysis'],
-    queryFn: fetchMarketAnalysis,
+    queryKey: ['market-analysis', historyRange],
+    queryFn: () => fetchMarketAnalysis(historyRange),
     refetchInterval: 5 * 60 * 1000,
   });
   const companiesQuery = useQuery({
@@ -53,7 +55,7 @@ export const MarketAnalysisView: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="Market Analysis"
-        description="Market quotes and summaries from NEPSE Alpha, ShareSansar, and Merolagani. Technical indicators are shown when NEPSE Alpha provides them."
+        description="Quotes and index data are collected from NEPSE Alpha, ShareSansar, and Merolagani. Bizmandu provides market news but no structured quote feed."
         icon={TrendingUp}
       />
       {marketQuery.isLoading ? (
@@ -63,7 +65,17 @@ export const MarketAnalysisView: React.FC = () => {
           {marketQuery.error.message}
         </p>
       ) : marketQuery.data?.snapshot ? (
-        <NepseMarketOverview data={marketQuery.data} />
+        <NepseMarketOverview
+          data={marketQuery.data}
+          range={historyRange}
+          onRangeChange={setHistoryRange}
+        />
+      ) : marketQuery.data?.history.length ? (
+        <HistoricalIndexOnly
+          data={marketQuery.data}
+          range={historyRange}
+          onRangeChange={setHistoryRange}
+        />
       ) : (
         <EmptyState
           title="Market data is not available yet"
@@ -181,7 +193,124 @@ export const MarketAnalysisView: React.FC = () => {
   );
 };
 
-function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
+function HistoricalIndexOnly({
+  data,
+  range,
+  onRangeChange,
+}: {
+  data: ApiMarketAnalysis;
+  range: ApiMarketHistoryRange;
+  onRangeChange: (range: ApiMarketHistoryRange) => void;
+}) {
+  const chartData = data.history
+    .map((point) => ({
+      time: Date.parse(`${point.date}T00:00:00+05:45`),
+      value: Number(point.value),
+    }))
+    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.value));
+  const historyPeriod = data.history_period;
+  const updatedAt = historyPeriod.updated_at
+    ? new Intl.DateTimeFormat('en-NP', {
+        timeZone: 'Asia/Kathmandu',
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(historyPeriod.updated_at))
+    : 'Unavailable';
+
+  return (
+    <ChartCard
+      title="NEPSE historical performance"
+      subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`}`}
+      footer={`Available data: ${historyPeriod.available_from ?? 'Unavailable'} – ${historyPeriod.available_to ?? 'Unavailable'} · Last updated ${updatedAt} NPT`}
+      actions={
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          History
+          <select
+            value={range}
+            onChange={(event) =>
+              onRangeChange(event.target.value as ApiMarketHistoryRange)
+            }
+            className="rounded border border-slate-300 bg-transparent px-2 py-1 text-slate-900 dark:border-slate-700 dark:text-slate-100"
+            aria-label="NEPSE historical date range"
+          >
+            <option value="7d">7 days</option>
+            <option value="15d">15 days</option>
+            <option value="30d">30 days</option>
+            <option value="90d">90 days</option>
+            <option value="180d">180 days</option>
+            <option value="1y">1 year</option>
+            <option value="all">All available</option>
+          </select>
+        </label>
+      }
+    >
+      {chartData.length ? (
+        <div className="h-64 w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.45} />
+              <XAxis
+                dataKey="time"
+                type="number"
+                scale="time"
+                domain={['dataMin', 'dataMax']}
+                minTickGap={36}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(value: number) => formatHistoryTick(value, '')}
+              />
+              <YAxis
+                domain={['auto', 'auto']}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(value: number) => formatMarketNumber(String(value))}
+                width={64}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#111827',
+                  borderColor: '#334155',
+                  color: '#e2e8f0',
+                }}
+                labelFormatter={(value) =>
+                  new Intl.DateTimeFormat('en-NP', {
+                    timeZone: 'Asia/Kathmandu',
+                    dateStyle: 'medium',
+                  }).format(new Date(Number(value)))
+                }
+                formatter={(value) => [formatMarketNumber(String(value)), 'NEPSE']}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                name="NEPSE"
+                stroke="#10b981"
+                strokeWidth={2}
+                fill="#10b981"
+                fillOpacity={0.15}
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <EmptyState
+          title="Index history is unavailable"
+          description="No provider-supplied historical index values are available for this range."
+          className="max-w-none"
+        />
+      )}
+    </ChartCard>
+  );
+}
+
+function NepseMarketOverview({
+  data,
+  range,
+  onRangeChange,
+}: {
+  data: ApiMarketAnalysis;
+  range: ApiMarketHistoryRange;
+  onRangeChange: (range: ApiMarketHistoryRange) => void;
+}) {
   const snapshot = data.snapshot;
   if (!snapshot) return null;
 
@@ -211,6 +340,18 @@ function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
   const technical = snapshot.technical_indicators;
   const technicalSummary = asRecord(technical.summary);
   const indicatorGroups = asRecord(technical.indicators);
+  const historyPeriod = data.history_period;
+  const availableRange =
+    historyPeriod.available_from && historyPeriod.available_to
+      ? `${historyPeriod.available_from} – ${historyPeriod.available_to}`
+      : 'Unavailable';
+  const historyUpdatedAt = historyPeriod.updated_at
+    ? new Intl.DateTimeFormat('en-NP', {
+        timeZone: 'Asia/Kathmandu',
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(historyPeriod.updated_at))
+    : 'Unavailable';
 
   return (
     <section className="space-y-4" aria-label="NEPSE market overview">
@@ -218,9 +359,30 @@ function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
         <h2 className="text-base font-semibold">
           NEPSE market overview · {snapshot.source}
         </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {marketStatus} · Updated {updatedAt} NPT
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            History
+            <select
+              value={range}
+              onChange={(event) =>
+                onRangeChange(event.target.value as ApiMarketHistoryRange)
+              }
+              className="rounded border border-slate-300 bg-transparent px-2 py-1 text-slate-900 dark:border-slate-700 dark:text-slate-100"
+              aria-label="NEPSE historical date range"
+            >
+              <option value="7d">7 days</option>
+              <option value="15d">15 days</option>
+              <option value="30d">30 days</option>
+              <option value="90d">90 days</option>
+              <option value="180d">180 days</option>
+              <option value="1y">1 year</option>
+              <option value="all">All available</option>
+            </select>
+          </label>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {marketStatus} · Updated {updatedAt} NPT
+          </p>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -261,12 +423,13 @@ function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
 
       <ChartCard
         title="NEPSE historical performance"
-        subtitle="Collected daily closes and provider-supplied intraday observations"
-        footer="Longer-term history will build as the collector records additional sessions."
+        subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`}`}
+        footer={`Available data: ${availableRange} · Last updated ${historyUpdatedAt} NPT`}
       >
         {chartData.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+          <div className="h-64 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="nepseIndexFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#10b981" stopOpacity={0.28} />
@@ -316,8 +479,9 @@ function NepseMarketOverview({ data }: { data: ApiMarketAnalysis }) {
                 isAnimationActive={false}
                 connectNulls
               />
-            </AreaChart>
-          </ResponsiveContainer>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
         ) : (
           <EmptyState
             title="Index history is unavailable"
@@ -481,6 +645,9 @@ function MarketStockTable({ stocks }: { stocks: ApiMarketStock[] }) {
             <tr>
               <th className="p-2 font-medium">Symbol</th>
               <th className="p-2 font-medium">Source</th>
+              <th className="p-2 text-right font-medium">Open</th>
+              <th className="p-2 text-right font-medium">High</th>
+              <th className="p-2 text-right font-medium">Low</th>
               <th className="p-2 text-right font-medium">LTP</th>
               <th className="p-2 text-right font-medium">Change</th>
               <th className="p-2 text-right font-medium">Volume</th>
@@ -495,6 +662,15 @@ function MarketStockTable({ stocks }: { stocks: ApiMarketStock[] }) {
               >
                 <td className="p-2 font-mono font-semibold">{stock.symbol}</td>
                 <td className="p-2 text-xs text-slate-500">{stock.source}</td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.open_price)}
+                </td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.high_price)}
+                </td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.low_price)}
+                </td>
                 <td className="p-2 text-right font-mono">
                   {formatMarketNumber(stock.close_price)}
                 </td>

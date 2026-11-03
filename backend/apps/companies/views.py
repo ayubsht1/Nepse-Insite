@@ -33,12 +33,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
         prices = StockPrice.objects.filter(company=company, date__lte=end)
         if start is not None:
             prices = prices.filter(date__gte=start)
-        page = self.paginate_queryset(prices)
-        serializer = StockPriceSerializer(
-            page if page is not None else prices, many=True
-        )
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
+        serializer = StockPriceSerializer(prices, many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"], url_path="behavior-summary")

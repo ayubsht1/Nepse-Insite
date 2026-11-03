@@ -181,12 +181,12 @@ return standard DRF validation errors.
 | `GET` | `/api/companies/` | Authenticated | Paginated companies; search, sector, active filters. |
 | `GET` | `/api/companies/{id}/` | Authenticated | Company details. |
 | `POST/PATCH/DELETE` | `/api/companies/`, `/api/companies/{id}/` | Admin | Company directory administration. |
-| `GET` | `/api/companies/{id}/prices/?range=30d` | Authenticated | Historical OHLCV; `range` supports day ranges, `1y`, `all`, optional `from`/`to`. |
+| `GET` | `/api/companies/{id}/prices/?range=30d` | Authenticated | Historical OHLCV and provider-reported daily changes; `range` supports day ranges, `1y`, `all`, optional `from`/`to`. |
 | `GET` | `/api/companies/{id}/behavior-summary/?range=30d` | Authenticated | Recorded price, VWAP, pressure estimate, anomaly, broker, and news observations. |
 | `GET` | `/api/companies/compare/?ids=1,2&range=30d` | Authenticated | Compare 2–10 companies. |
 | `GET` | `/api/market-data/prices/?company_id=1` | Authenticated | Paginated daily price rows. |
 | `GET` | `/api/market-data/floorsheet/?company_id=1` | Authenticated | Paginated transaction/broker rows. |
-| `GET` | `/api/market-data/analysis/` | Authenticated | Latest sourced market summary, index history, indices/sectors, provider-specific stock quotes, leaders, and available technical indicators. |
+| `GET` | `/api/market-data/analysis/?range=30d` | Authenticated | Latest sourced market summary and daily NEPSE history; `range` supports `7d`, `15d`, `30d`, `90d`, `180d`, `1y`, and `all`. |
 | `POST` | `/api/market-data/admin/prices/import/` | Admin | Import validated OHLCV; `(company,date)` upserts. |
 | `POST` | `/api/market-data/admin/floorsheet/import/` | Admin | Import transaction rows with deduplication by source record ID. |
 | `GET` | `/api/news/?company_id=1&search=...` | Authenticated | Paginated articles and multi-company tags. |
@@ -266,20 +266,30 @@ HTML provider's `robots.txt` before requesting its market pages.
 Celery Beat schedules collection every 15 minutes Sunday–Thursday from 11:00
 through 15:00 Asia/Kathmandu. Tasks avoid requests outside that window and the
 ShareSansar/Merolagani tasks also stop for the day after NEPSE Alpha reports the
-market closed. Technical indicators are retained across closed snapshots and
-fetched when needed. Snapshot uniqueness and timestamp uniqueness prevent
-duplicate daily/index-history records. The live endpoint currently provides
-intraday history; daily history accumulates from collected snapshots rather
-than being backfilled with invented values. The authenticated overview and
-market ticker show sourced index/sector data, quote rows, and last-updated time.
+market closed. Merolagani floorsheet rows are collected on the same schedule
+and deduplicated by transaction ID. Its public page currently exposes a
+paginated first page of up to 500 transactions; VWAP and broker statistics use
+the rows actually stored and report this coverage limitation. ShareSansar's
+NEPSE index-history page is queried daily for up to ten years; historical rows
+are saved only when the provider returns valid records. Snapshot uniqueness and
+timestamp uniqueness prevent duplicate daily/index-history records.
+
+Complete company OHLCV rows are matched to active company records by symbol and
+upserted by `(company, date)`. NEPSE Alpha takes precedence over ShareSansar,
+then Merolagani, for conflicting same-day company prices; lower-priority
+sources still fill gaps. Unmatched symbols and invalid/incomplete OHLCV are
+logged and skipped rather than creating synthetic companies or prices.
+Provider-reported price changes are retained when available. Daily index
+history accumulates from snapshots and valid ShareSansar historical responses;
+no values are backfilled or synthesized when source data is absent.
 
 The inspected Merolagani market page did not expose a populated index table, so
 its index, sector, and whole-market totals are not collected. Bizmandu is
 configured as a news source only; no structured public quote/index endpoint was
 confirmed. ShareSansar/Merolagani HTML parsing is limited to fields present in
-their market pages. Stock snapshots remain separate by provider and date; the
-overview presents each provider's latest quotes without merging conflicting
-prices.
+their market pages. Per-provider snapshots remain separate; the overview
+presents each provider's latest quotes while company price records select the
+highest-priority available source.
 
 ## Market calculations and limits
 

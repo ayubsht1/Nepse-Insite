@@ -11,8 +11,8 @@ created with `python manage.py seed` and is explicitly labeled as fabricated.
   Query.
 - **Backend:** Django 6, Django REST Framework, SimpleJWT, drf-spectacular.
 - **Data:** PostgreSQL (or Supabase PostgreSQL); Redis for Celery and Channels.
-- **Background work:** Celery worker + Beat; separate NEPSE Alpha, ShareSansar,
-  and Merolagani market-data collection plus configurable news crawling.
+- **Background work:** Celery worker + Beat; NEPSE Alpha, ShareSansar, and
+  Merolagani market-data collection plus four-source news crawling.
 - **Real time:** authenticated Django Channels updates over ASGI/WebSockets.
 - **Analysis:** Decimal-based calculations over stored OHLCV and floorsheet
   records; unavailable inputs are returned as unavailable.
@@ -127,28 +127,41 @@ confirmation that a publisher permits crawling or that selectors still work.
 Verify publisher terms and current `robots.txt` before enabling any source.
 The crawler checks robots rules on listing/article URLs, enforces same-site
 links/redirects, rate-limits requests, and reports empty discovery/parsing as a
-failed run. It does not bypass access controls. No live crawl or article
-persistence is claimed. OHLCV and floorsheet records must otherwise come from a
-verified/licensed source.
+failed run. It does not bypass access controls. No live news crawl or article
+persistence is claimed. Separate market-data collectors ingest currently
+available public provider pages; those pages are not documented APIs or a
+redistribution license. Verify publisher terms and obtain any required
+permission before production use.
 Consequently, company-behavior calculations on demo records are explicitly
-fictional; VWAP and broker analysis remain unavailable until sourced
-company-level OHLCV and floorsheet records exist. The pressure value is only
-an OHLCV close-location estimate, not actual buy/sell volume.
+fictional; VWAP and broker analysis use only stored company-level OHLCV and
+floorsheet records and remain unavailable where those records are absent. The
+pressure value is only an OHLCV close-location estimate, not actual buy/sell
+volume.
 
 The Market Analysis overview collects public NEPSE Alpha JSON from `/live/stocks`
 and `/trading-ta`, ShareSansar's `/market` and `/today-share-price` pages, and
 Merolagani's `/LatestMarket.aspx` page. These are website endpoints/pages, not
 documented or guaranteed APIs. Celery Beat polls every 15 minutes during the
-Sunday–Thursday 11:00–15:00 Nepal-time session and skips further collection once
-NEPSE Alpha reports the market closed. Index and sector data are available
-from NEPSE Alpha and ShareSansar; stock quotes and leaders are collected from
-all three providers where their pages expose them. Bizmandu is used for news
-only: no structured public quote/index source was confirmed. Merolagani's
-inspected market page did not expose a populated index table, so its index,
-sector, and market-total values remain unavailable rather than inferred. The
-Alpha live endpoint supplies intraday index history; longer-term daily history
-accumulates from snapshots and is not backfilled. Provider access, terms, and
-page formats may change.
+Sunday–Thursday 11:00–15:00 Nepal-time session. Complete company OHLCV rows are
+matched to active companies by symbol and upserted by company/date; NEPSE Alpha
+is preferred over ShareSansar and Merolagani when their same-day prices differ.
+Incomplete or unmatched rows are skipped and logged. After market close, Beat
+imports ShareSansar's public Index History DataTables rows and the historical
+price/floorsheet rows exposed on each active company's public profile. The
+history collectors paginate the provider's 50-row tables, preserve provider
+dates and values, and upsert into `MarketIndexSnapshot`, `StockPrice`, and
+`FloorsheetTransaction`. Later runs refresh recent company history and daily
+floorsheet records. Merolagani's paginated floorsheet page remains an independent
+source; it currently exposes up to 500 rows per page, so VWAP/broker analysis may
+cover only stored rows. Merolagani's inspected market page did not expose a
+populated index table, so its index, sector, and market-total values remain
+unavailable. NEPSE Alpha's CSV export is browser-accessible but blocks direct
+backend requests in the current environment, so the collector does not bypass
+that restriction. Bizmandu remains a news source: no structured quote feed was
+confirmed. Missing data is displayed as unavailable, never backfilled with
+estimates. ShareSansar pages are public but are not documented APIs; review its
+current terms and robots directives before deploying collection beyond local
+development. Provider access, terms, and page formats may change.
 
 ## API and real-time docs
 
