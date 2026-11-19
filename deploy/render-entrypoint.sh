@@ -16,6 +16,7 @@ chown app:app "$STATIC_ROOT" "$MEDIA_ROOT"
 
 cd /app/backend
 python manage.py migrate --noinput
+python /app/backend/seed.py
 python manage.py collectstatic --noinput
 
 envsubst '${PORT} ${NGINX_FRONTEND_UPSTREAM} ${NGINX_BACKEND_UPSTREAM} ${NGINX_STATIC_ROOT} ${NGINX_MEDIA_ROOT}' \
@@ -23,5 +24,5 @@ envsubst '${PORT} ${NGINX_FRONTEND_UPSTREAM} ${NGINX_BACKEND_UPSTREAM} ${NGINX_S
     > /etc/nginx/nginx.conf
 
 nginx -t
-printf 'Starting Nginx on 0.0.0.0:%s\n' "$PORT"
-exec /usr/bin/supervisord -n -c "$SUPERVISOR_CONFIG"
+printf 'Starting Nginx and web processes on port %s; Celery processes are managed by the container launcher\n' "$PORT"
+exec python /usr/local/bin/render-processes.py

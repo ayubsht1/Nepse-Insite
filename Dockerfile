@@ -56,6 +56,7 @@ COPY --from=frontend-build /src/frontend/public /app/frontend/public
 COPY --from=frontend-build /src/frontend/package.json /app/frontend/package.json
 COPY --chown=app:app backend/ /app/backend/
 COPY --chown=app:app deploy/render-entrypoint.sh /usr/local/bin/render-entrypoint.sh
+COPY deploy/render-processes.py /usr/local/bin/render-processes.py
 COPY deploy/nginx.conf /etc/nginx/nginx.conf.template
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 
@@ -65,6 +66,6 @@ RUN sed -i 's/\r$//' /usr/local/bin/render-entrypoint.sh \
 EXPOSE 10000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('PORT', '10000') + '/healthz', timeout=4)"
+    CMD python -c "import os, urllib.request; host=os.getenv('ALLOWED_HOSTS', 'localhost').split(',')[0].strip(); request=urllib.request.Request('http://127.0.0.1:' + os.getenv('PORT', '10000') + '/healthz', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=4)"
 
 CMD ["/usr/local/bin/render-entrypoint.sh"]
