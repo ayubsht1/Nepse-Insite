@@ -58,7 +58,8 @@ COPY deploy/render-processes.py /usr/local/bin/render-processes.py
 COPY deploy/nginx.conf /etc/nginx/nginx.conf.template
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 
-RUN sed -i 's/\r$//' /usr/local/bin/render-entrypoint.sh \
+RUN sed -i '1s/^\xEF\xBB\xBF//' /usr/local/bin/render-entrypoint.sh \
+    && sed -i 's/\r$//' /usr/local/bin/render-entrypoint.sh \
     && chmod 755 /usr/local/bin/render-entrypoint.sh
 
 EXPOSE 10000
