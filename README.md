@@ -106,10 +106,9 @@ The root `Dockerfile` builds the Next.js production bundle and Django
 dependencies, then runs Nginx, Next.js, and Daphne in one Render Web Service.
 Nginx listens on Render's `PORT` (default `10000`) and proxies to the
 localhost-only application processes. Django migrations and `collectstatic`
-run before the processes start; Supervisor starts Nginx only after Next.js
-returns a successful readiness response. Startup fails if migrations,
-`collectstatic`, or Next.js readiness fails. Celery workers and Beat are
-deliberately not started in the Web Service.
+run before Supervisor starts Nginx, Daphne, and Next.js. Nginx binds Render's
+public `PORT` immediately; Next.js and Daphne bind to localhost. Celery workers
+and Beat are deliberately not started in the Web Service.
 
 In Render, create a **Web Service** from this repository, select **Docker**,
 and leave the Dockerfile path at `./Dockerfile`. Add these environment variables
