@@ -31,7 +31,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DJANGO_SETTINGS_MODULE=config.settings.production \
     NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=10000 \
     STATIC_ROOT=/srv/static \
     MEDIA_ROOT=/srv/media
 
@@ -67,4 +66,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     CMD python -c "import os, urllib.request; host=os.getenv('ALLOWED_HOSTS', 'localhost').split(',')[0].strip(); base='http://127.0.0.1:' + os.getenv('PORT', '10000'); headers={'Host':host, 'X-Forwarded-Proto':'https'}; [urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=4).close() for path in ('/healthz', '/') ]"
 
-CMD ["/usr/local/bin/render-entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/render-entrypoint.sh"]
