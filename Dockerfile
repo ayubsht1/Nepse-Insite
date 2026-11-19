@@ -42,11 +42,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
     && useradd --system --gid app --create-home app \
-    && groupadd --system nginx \
-    && useradd --system --gid nginx --no-create-home --shell /usr/sbin/nologin nginx \
     && mkdir -p /srv/static /srv/media /var/lib/celerybeat /var/cache/nginx /var/lib/nginx \
     && chown -R app:app /srv/static /srv/media /var/lib/celerybeat \
-    && chown -R nginx:nginx /var/cache/nginx /var/lib/nginx
+    && chown -R app:app /var/cache/nginx /var/lib/nginx
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
 COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
@@ -66,6 +64,6 @@ RUN sed -i 's/\r$//' /usr/local/bin/render-entrypoint.sh \
 EXPOSE 10000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD python -c "import os, urllib.request; host=os.getenv('ALLOWED_HOSTS', 'localhost').split(',')[0].strip(); request=urllib.request.Request('http://127.0.0.1:' + os.getenv('PORT', '10000') + '/healthz', headers={'Host':host, 'X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=4)"
+    CMD python -c "import os, urllib.request; host=os.getenv('ALLOWED_HOSTS', 'localhost').split(',')[0].strip(); base='http://127.0.0.1:' + os.getenv('PORT', '10000'); headers={'Host':host, 'X-Forwarded-Proto':'https'}; [urllib.request.urlopen(urllib.request.Request(base + path, headers=headers), timeout=4).close() for path in ('/healthz', '/') ]"
 
 CMD ["/usr/local/bin/render-entrypoint.sh"]

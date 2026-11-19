@@ -1,5 +1,6 @@
 import logging
 import os
+import pwd
 import signal
 import subprocess
 import sys
@@ -25,7 +26,6 @@ def _start_processes(processes):
         (
             "supervisord",
             ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"],
-            False,
         ),
         (
             "celery-worker-1",
@@ -38,7 +38,6 @@ def _start_processes(processes):
                 "--concurrency=2",
                 "--hostname=worker1@%h",
             ],
-            True,
         ),
         (
             "celery-worker-2",
@@ -51,7 +50,6 @@ def _start_processes(processes):
                 "--concurrency=2",
                 "--hostname=worker2@%h",
             ],
-            True,
         ),
         (
             "celery-beat",
@@ -63,22 +61,35 @@ def _start_processes(processes):
                 "--loglevel=info",
                 "--schedule=/var/lib/celerybeat/celerybeat-schedule",
             ],
-            True,
         ),
     )
-    for name, command, run_as_app in specs:
+    for name, command in specs:
         if shutdown_signal is not None:
             break
         options = {
             "cwd": "/app/backend",
             "start_new_session": True,
         }
-        if run_as_app:
-            options.update(user="app", group="app")
         logger.info("Starting %s", name)
         process = subprocess.Popen(command, **options)
         processes.append((name, process))
         logger.info("Started %s with pid %s", name, process.pid)
+
+
+def _drop_privileges():
+    app_user = pwd.getpwnam("app")
+    if os.geteuid() == 0:
+        os.initgroups(app_user.pw_name, app_user.pw_gid)
+        os.setgid(app_user.pw_gid)
+        os.setuid(app_user.pw_uid)
+    elif os.geteuid() != app_user.pw_uid:
+        raise PermissionError("The container launcher must run as root or app.")
+    os.environ["HOME"] = app_user.pw_dir
+    logger.info(
+        "Running managed processes as app (uid=%s gid=%s)",
+        app_user.pw_uid,
+        app_user.pw_gid,
+    )
 
 
 def _stop_processes(processes):
@@ -114,6 +125,7 @@ def main():
     processes = []
     exit_code = 0
     try:
+        _drop_privileges()
         _start_processes(processes)
         while shutdown_signal is None:
             for name, process in processes:
