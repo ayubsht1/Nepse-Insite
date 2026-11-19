@@ -9,8 +9,10 @@ FROM node:22-bookworm-slim AS frontend-build
 
 WORKDIR /src/frontend
 ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY --from=frontend-dependencies /src/frontend/node_modules ./node_modules
 COPY frontend/ ./
+
 RUN npm run build
 
 FROM node:22-bookworm-slim AS frontend-production-dependencies
@@ -38,16 +40,34 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/backend
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates gettext-base libstdc++6 nginx supervisor \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       gettext-base \
+       libstdc++6 \
+       nginx \
+       supervisor \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
     && useradd --system --gid app --create-home app \
-    && mkdir -p /srv/static /srv/media /var/lib/celerybeat \
-       /var/cache/nginx /var/lib/nginx /tmp \
-    && chown -R app:app /srv/static /srv/media /var/lib/celerybeat \
-       /var/cache/nginx /var/lib/nginx
+    && mkdir -p \
+       /srv/static \
+       /srv/media \
+       /var/lib/celerybeat \
+       /var/cache/nginx \
+       /var/lib/nginx \
+       /tmp/nginx_client_temp \
+       /tmp/nginx_proxy_temp \
+    && chown -R app:app \
+       /srv/static \
+       /srv/media \
+       /var/lib/celerybeat \
+       /var/cache/nginx \
+       /var/lib/nginx \
+       /tmp/nginx_client_temp \
+       /tmp/nginx_proxy_temp
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
+
 COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
 
 COPY --chown=app:app frontend/package.json /app/frontend/package.json
@@ -55,9 +75,15 @@ COPY --chown=app:app frontend/public/ /app/frontend/public/
 COPY --from=frontend-build --chown=app:app /src/frontend/.next /app/frontend/.next
 COPY --from=frontend-production-dependencies --chown=app:app /src/frontend/node_modules /app/frontend/node_modules
 
+# Copy Next.js configuration when present.
+# If your project uses next.config.mjs, next.config.js, or next.config.ts,
+# add the matching COPY instruction here.
+
 COPY --chown=app:app backend/ /app/backend/
+
 COPY --chown=app:app deploy/render-entrypoint.sh /usr/local/bin/render-entrypoint.sh
 COPY --chown=app:app deploy/render-processes.py /usr/local/bin/render-processes.py
+
 COPY deploy/nginx.conf /etc/nginx/nginx.conf.template
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 
