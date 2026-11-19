@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from apps.companies.models import Company
 from apps.news.models import NewsArticle
+from apps.users.models import UserProfile
 
 DEMO_COMPANIES = (
     ("DEMO1", "Himalaya Demo Bank Limited", "Commercial Banks"),
@@ -34,21 +35,33 @@ DEMO_NEWS = (
 def seed_superuser():
     username = os.getenv("DJANGO_SUPERUSER_USERNAME", "ayub").strip() or "ayub"
     password = os.getenv("DJANGO_SUPERUSER_PASSWORD")
-    if not password:
-        print("[seed] Superuser creation skipped: password is not configured.")
-        return
 
     User = get_user_model()
-    if User.objects.filter(username=username).exists():
-        print("[seed] Existing user left unchanged.")
+
+    user = User.objects.filter(username=username).first()
+
+    if user is None:
+        if not password:
+            print("[seed] Superuser creation skipped: password is not configured.")
+            return
+
+        user = User.objects.create_superuser(
+            username=username,
+            email=os.getenv("DJANGO_SUPERUSER_EMAIL", ""),
+            password=password,
+        )
+        print("[seed] Deployment superuser created.")
+
+    elif not user.is_superuser:
+        print("[seed] Existing user is not a superuser; permissions unchanged.")
         return
 
-    User.objects.create_superuser(
-        username=username,
-        email=os.getenv("DJANGO_SUPERUSER_EMAIL", ""),
-        password=password,
+    UserProfile.objects.update_or_create(
+        user=user,
+        defaults={"role": UserProfile.Role.ADMIN},
     )
-    print("[seed] Deployment superuser created.")
+
+    print("[seed] Admin UserProfile created or updated.")
 
 
 def seed_companies():
