@@ -3,6 +3,10 @@ from urllib.parse import urlparse
 
 from .base import *
 
+os.environ["HOME"] = "/home/app"
+for postgres_setting in ("PGSSLCERT", "PGSSLKEY", "PGSERVICE", "PGSERVICEFILE"):
+    os.environ.pop(postgres_setting, None)
+
 required_environment = (
     "SECRET_KEY",
     "DATABASE_URL",
