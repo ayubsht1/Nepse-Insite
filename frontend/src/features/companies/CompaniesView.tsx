@@ -4,11 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ApiCompany,
+  ApiMarketLeader,
   ApiMarketHistoryRange,
   fetchCompanies,
   fetchCompanyBehaviorSummary,
   fetchCompanyFloorsheet,
   fetchCompanyPrices,
+  fetchMarketAnalysis,
 } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { DataTable, EmptyState, LoadingState, PageHeader } from '../../components/ui';
@@ -28,16 +30,15 @@ export const CompaniesView: React.FC = () => {
   const { selectedCompanyId, setSelectedCompanyId } = useApp();
   const [search, setSearch] = useState('');
   const [sector, setSector] = useState('');
-  const [page, setPage] = useState(1);
   const [selectedCompany, setSelectedCompany] = useState<ApiCompany | null>(null);
   const companiesQuery = useQuery({
-    queryKey: ['companies', search, sector, page],
-    queryFn: () =>
-      fetchCompanies({
-        search: search || undefined,
-        sector: sector || undefined,
-        page,
-      }),
+    queryKey: ['companies', 'directory', search, sector],
+    queryFn: () => fetchAllCompanies(search, sector),
+  });
+  const marketQuery = useQuery({
+    queryKey: ['market-analysis', '30d'],
+    queryFn: () => fetchMarketAnalysis('30d'),
+    refetchInterval: 5 * 60 * 1000,
   });
   const selectedCompanyQuery = useQuery({
     queryKey: ['company-selection', selectedCompanyId],
@@ -94,19 +95,56 @@ export const CompaniesView: React.FC = () => {
     },
   ];
 
-  const result = companiesQuery.data;
-  const pageCount = result ? Math.max(1, Math.ceil(result.count / 25)) : 1;
+  const companies = companiesQuery.data ?? [];
+  const leaders = marketQuery.data?.snapshot;
+  const topGainers = leaders?.top_gainers.slice(0, 10) ?? [];
+  const topLosers = leaders?.top_losers.slice(0, 10) ?? [];
+  const topTraded = leaders?.top_traded.slice(0, 10) ?? [];
+  const companyBySymbol = new Map(
+    companies.map((company) => [company.symbol.toUpperCase(), company]),
+  );
+  const leaderSymbols = new Set(
+    [...topGainers, ...topLosers, ...topTraded].map((leader) =>
+      leader.symbol.toUpperCase(),
+    ),
+  );
+  const otherCompanies = companies.filter(
+    (company) => !leaderSymbols.has(company.symbol.toUpperCase()),
+  );
+  const matchesFilters = (symbol: string, name: string) => {
+    const company = companyBySymbol.get(symbol.toUpperCase());
+    const matchesSearch =
+      !search ||
+      symbol.toLowerCase().includes(search.toLowerCase()) ||
+      name.toLowerCase().includes(search.toLowerCase());
+    return (
+      matchesSearch &&
+      (!sector || company?.sector.toLowerCase().includes(sector.toLowerCase()))
+    );
+  };
+  const filteredGainers = topGainers.filter((leader) =>
+    matchesFilters(leader.symbol, leader.name),
+  );
+  const filteredLosers = topLosers.filter((leader) =>
+    matchesFilters(leader.symbol, leader.name),
+  );
+  const filteredTraded = topTraded.filter((leader) =>
+    matchesFilters(leader.symbol, leader.name),
+  );
+  const filteredOthers = otherCompanies.filter((company) =>
+    matchesFilters(company.symbol, company.name),
+  );
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="NEPSE Companies"
-        description="Company prices and analytics update automatically from available NEPSE market feeds. Missing provider data is shown as unavailable."
+        description="Browse the top 10 daily gainers, losers, and traded companies, plus all remaining companies in Others."
         icon={Building2}
         badge={
-          result && (
+          companiesQuery.data && (
             <span className="rounded-full bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
-              {result.count} companies
+              {companies.length} companies
             </span>
           )
         }
@@ -115,19 +153,13 @@ export const CompaniesView: React.FC = () => {
         <input
           type="search"
           value={search}
-          onChange={(event) => {
-            setPage(1);
-            setSearch(event.target.value);
-          }}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search company or symbol"
           className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
         />
         <input
           value={sector}
-          onChange={(event) => {
-            setPage(1);
-            setSector(event.target.value);
-          }}
+          onChange={(event) => setSector(event.target.value)}
           placeholder="Filter by sector"
           className="rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-slate-700"
         />
@@ -139,40 +171,62 @@ export const CompaniesView: React.FC = () => {
         <p role="alert" className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">
           {companiesQuery.error.message}
         </p>
-      ) : result?.results.length ? (
-        <>
-          <DataTable
-            columns={columns}
-            data={result.results}
-            keyExtractor={(company) => company.id}
-          />
-          {pageCount > 1 && (
-            <div className="flex items-center justify-end gap-3 text-sm">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((current) => current - 1)}
-                className="rounded border border-slate-300 px-3 py-1 disabled:opacity-40 dark:border-slate-700"
-              >
-                Previous
-              </button>
-              <span>
-                Page {page} of {pageCount}
-              </span>
-              <button
-                disabled={page >= pageCount}
-                onClick={() => setPage((current) => current + 1)}
-                className="rounded border border-slate-300 px-3 py-1 disabled:opacity-40 dark:border-slate-700"
-              >
-                Next
-              </button>
-            </div>
+      ) : companies.length ? (
+        <div className="space-y-6">
+          {marketQuery.isError && (
+            <p role="alert" className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">
+              {marketQuery.error.message}
+            </p>
           )}
-        </>
+          {marketQuery.isLoading ? (
+            <LoadingState message="Loading market leaders…" />
+          ) : leaders ? (
+            <>
+              <LeaderSection
+                title="Top 10 Gainers"
+                leaders={filteredGainers}
+                valueLabel="Change"
+                companies={companyBySymbol}
+                onSelectCompany={setSelectedCompany}
+              />
+              <LeaderSection
+                title="Top 10 Losers"
+                leaders={filteredLosers}
+                valueLabel="Change"
+                companies={companyBySymbol}
+                onSelectCompany={setSelectedCompany}
+              />
+              <LeaderSection
+                title="Top 10 Traded"
+                leaders={filteredTraded}
+                valueLabel="Turnover (Cr)"
+                companies={companyBySymbol}
+                onSelectCompany={setSelectedCompany}
+              />
+            </>
+          ) : (
+            <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500 dark:border-slate-800">
+              Market leader data is not available yet.
+            </p>
+          )}
+          <section className="space-y-2">
+            <h2 className="font-semibold">
+              Others{' '}
+              <span className="text-sm font-normal text-slate-500">
+                ({filteredOthers.length})
+              </span>
+            </h2>
+            <DataTable
+              columns={columns}
+              data={filteredOthers}
+              keyExtractor={(company) => company.id}
+              pageSize={25}
+              emptyMessage="No other companies match the selected filters."
+            />
+          </section>
+        </div>
       ) : (
-        <EmptyState
-          title="No companies found"
-          description="The company directory is empty or no records match the selected filters."
-        />
+        <EmptyState title="No companies found" description="No company records are available." />
       )}
 
       {selectedCompany && (
@@ -187,6 +241,93 @@ export const CompaniesView: React.FC = () => {
     </div>
   );
 };
+
+async function fetchAllCompanies(search: string, sector: string) {
+  const params = {
+    search: search || undefined,
+    sector: sector || undefined,
+  };
+  const firstPage = await fetchCompanies({ ...params, page: 1 });
+  const companies = [...firstPage.results];
+
+  for (let page = 2; firstPage.next && companies.length < firstPage.count; page += 1) {
+    const nextPage = await fetchCompanies({ ...params, page });
+    companies.push(...nextPage.results);
+    if (!nextPage.next) break;
+  }
+
+  return companies;
+}
+
+function LeaderSection({
+  title,
+  leaders,
+  valueLabel,
+  companies,
+  onSelectCompany,
+}: {
+  title: string;
+  leaders: ApiMarketLeader[];
+  valueLabel: 'Change' | 'Turnover (Cr)';
+  companies: Map<string, ApiCompany>;
+  onSelectCompany: (company: ApiCompany) => void;
+}) {
+  const columns: Column<ApiMarketLeader>[] = [
+    {
+      key: 'symbol',
+      header: 'Company',
+      render: (leader) => (
+        <div>
+          <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+            {leader.symbol}
+          </span>
+          <span className="block text-[11px] text-slate-500">{leader.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'value',
+      header: valueLabel,
+      render: (leader) => {
+        const value =
+          valueLabel === 'Change' ? leader.change_percent : leader.turnover_crore;
+        if (value === null || value === undefined) return 'Unavailable';
+        return `${value}${valueLabel === 'Change' ? '%' : ''}`;
+      },
+    },
+    {
+      key: 'actions',
+      header: 'Data',
+      render: (leader) => {
+        const company = companies.get(leader.symbol.toUpperCase());
+        return company ? (
+          <button
+            onClick={() => onSelectCompany(company)}
+            className="rounded border border-slate-300 px-2.5 py-1 text-[11px] dark:border-slate-700"
+          >
+            Prices & analytics
+          </button>
+        ) : (
+          <span className="text-slate-400">Not in directory</span>
+        );
+      },
+    },
+  ];
+
+  return (
+    <section className="space-y-2">
+      <h2 className="font-semibold">
+        {title} <span className="text-sm font-normal text-slate-500">({leaders.length})</span>
+      </h2>
+      <DataTable
+        columns={columns}
+        data={leaders}
+        keyExtractor={(leader) => leader.symbol}
+        emptyMessage="No market leaders match the selected filters."
+      />
+    </section>
+  );
+}
 
 function CompanyMarketData({
   company,
