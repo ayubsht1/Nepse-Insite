@@ -15,7 +15,7 @@ mkdir -p "$STATIC_ROOT" "$MEDIA_ROOT"
 chown app:app "$STATIC_ROOT" "$MEDIA_ROOT"
 
 cd /app/backend
-python manage.py migrate --noinput
+python /app/backend/run_migrations.py
 python /app/backend/seed.py
 python manage.py collectstatic --noinput
 
