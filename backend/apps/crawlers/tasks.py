@@ -63,6 +63,7 @@ def crawl_source(self, source_id, run_id=None):
             "error_message",
         ]
     )
+    logger.info("Started crawl run %s for source %s", run.pk, source.key)
     _publish_run(run)
     user_agent = getattr(settings, "CRAWLER_USER_AGENT", "NEPSEInsightBot/1.0")
     client = httpx.Client(
@@ -97,6 +98,13 @@ def crawl_source(self, source_id, run_id=None):
             )
             _publish_run(run)
         run.refresh_from_db()
+        logger.info(
+            "Completed crawl run %s for source %s: %s articles created, %s duplicates",
+            run.pk,
+            source.key,
+            run.articles_created,
+            run.articles_duplicates,
+        )
         return {
             "run_id": run.pk,
             "status": run.status,
@@ -141,9 +149,9 @@ def crawl_source(self, source_id, run_id=None):
 
 @shared_task(name="apps.crawlers.tasks.crawl_enabled_sources")
 def crawl_enabled_sources():
-    return [
-        crawl_source.delay(source_id).id
-        for source_id in CrawlSource.objects.filter(enabled=True).values_list(
-            "id", flat=True
-        )
-    ]
+    source_ids = list(
+        CrawlSource.objects.filter(enabled=True).values_list("id", flat=True)
+    )
+    task_ids = [crawl_source.delay(source_id).id for source_id in source_ids]
+    logger.info("Dispatched %s enabled source crawl task(s)", len(task_ids))
+    return task_ids

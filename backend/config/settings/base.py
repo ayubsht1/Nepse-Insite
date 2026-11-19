@@ -163,7 +163,17 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [REDIS_URL]},
+        "CONFIG": {
+            "hosts": [
+                {
+                    "address": REDIS_URL,
+                    "socket_connect_timeout": 5,
+                    "socket_timeout": 15,
+                    "socket_keepalive": True,
+                    "health_check_interval": 30,
+                }
+            ]
+        },
     }
 }
 
