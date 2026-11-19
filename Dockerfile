@@ -44,8 +44,8 @@ RUN apt-get update \
     && useradd --system --gid app --create-home app \
     && groupadd --system nginx \
     && useradd --system --gid nginx --no-create-home --shell /usr/sbin/nologin nginx \
-    && mkdir -p /srv/static /srv/media /var/cache/nginx /var/lib/nginx \
-    && chown -R app:app /srv/static /srv/media \
+    && mkdir -p /srv/static /srv/media /var/lib/celerybeat /var/cache/nginx /var/lib/nginx \
+    && chown -R app:app /srv/static /srv/media /var/lib/celerybeat \
     && chown -R nginx:nginx /var/cache/nginx /var/lib/nginx
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
