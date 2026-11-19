@@ -1,3 +1,4 @@
+
 FROM node:22-bookworm-slim AS frontend-dependencies
 
 WORKDIR /src/frontend
@@ -41,25 +42,30 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system app \
     && useradd --system --gid app --create-home app \
-    && mkdir -p /srv/static /srv/media /var/lib/celerybeat /var/cache/nginx /var/lib/nginx \
+    && mkdir -p /srv/static /srv/media /var/lib/celerybeat \
+       /var/cache/nginx /var/lib/nginx /tmp \
     && chown -R app:app /srv/static /srv/media /var/lib/celerybeat \
-    && chown -R app:app /var/cache/nginx /var/lib/nginx
+       /var/cache/nginx /var/lib/nginx
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
 COPY --from=frontend-build /usr/local/bin/node /usr/local/bin/node
-COPY --from=frontend-production-dependencies /src/frontend/node_modules /app/frontend/node_modules
-COPY --from=frontend-build /src/frontend/.next /app/frontend/.next
-COPY --from=frontend-build /src/frontend/public /app/frontend/public
-COPY --from=frontend-build /src/frontend/package.json /app/frontend/package.json
+
+COPY --chown=app:app frontend/package.json /app/frontend/package.json
+COPY --chown=app:app frontend/public/ /app/frontend/public/
+COPY --from=frontend-build --chown=app:app /src/frontend/.next /app/frontend/.next
+COPY --from=frontend-production-dependencies --chown=app:app /src/frontend/node_modules /app/frontend/node_modules
+
 COPY --chown=app:app backend/ /app/backend/
 COPY --chown=app:app deploy/render-entrypoint.sh /usr/local/bin/render-entrypoint.sh
-COPY deploy/render-processes.py /usr/local/bin/render-processes.py
+COPY --chown=app:app deploy/render-processes.py /usr/local/bin/render-processes.py
 COPY deploy/nginx.conf /etc/nginx/nginx.conf.template
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
 
 RUN sed -i '1s/^\xEF\xBB\xBF//' /usr/local/bin/render-entrypoint.sh \
     && sed -i 's/\r$//' /usr/local/bin/render-entrypoint.sh \
-    && chmod 755 /usr/local/bin/render-entrypoint.sh
+    && chmod 755 /usr/local/bin/render-entrypoint.sh \
+    && chmod 755 /usr/local/bin/render-processes.py \
+    && chown -R app:app /app/frontend /app/backend
 
 EXPOSE 10000
 
