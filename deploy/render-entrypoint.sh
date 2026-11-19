@@ -22,4 +22,6 @@ envsubst '${PORT} ${NGINX_FRONTEND_UPSTREAM} ${NGINX_BACKEND_UPSTREAM} ${NGINX_S
     < /etc/nginx/nginx.conf.template \
     > /etc/nginx/nginx.conf
 
+nginx -t
+printf 'Starting Nginx on 0.0.0.0:%s\n' "$PORT"
 exec /usr/bin/supervisord -n -c "$SUPERVISOR_CONFIG"

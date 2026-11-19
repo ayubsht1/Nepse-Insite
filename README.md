@@ -108,7 +108,8 @@ Nginx listens on Render's `PORT` (default `10000`) and proxies to the
 localhost-only application processes. Django migrations and `collectstatic`
 run before Supervisor starts Nginx, Daphne, and Next.js. Nginx binds Render's
 public `PORT` immediately; Next.js and Daphne bind to localhost. Celery workers
-and Beat are deliberately not started in the Web Service.
+and Beat are deliberately not started in the Web Service. Nginx answers
+`HEAD /` directly for Render's health check; `GET /` remains proxied to Next.js.
 
 In Render, create a **Web Service** from this repository, select **Docker**,
 and leave the Dockerfile path at `./Dockerfile`. Add these environment variables
