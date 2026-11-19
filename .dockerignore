@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env*
+**/.env*
+**/node_modules
+**/.next
+**/.venv
+**/venv
+**/__pycache__
+**/*.py[cod]
+**/db.sqlite3
+**/staticfiles
+**/media
+**/npm-debug.log*
+**/tsconfig.tsbuildinfo
