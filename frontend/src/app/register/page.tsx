@@ -148,7 +148,7 @@ export default function RegisterPage() {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  First Name
+                  Full Name
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -161,7 +161,7 @@ export default function RegisterPage() {
                       setFirstName(event.target.value);
                       clearFieldError('first_name');
                     }}
-                    placeholder="Your first name"
+                    placeholder="Your full name"
                     className={getInputStyles('first_name')}
                   />
                 </div>
