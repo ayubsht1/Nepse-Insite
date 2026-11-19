@@ -18,48 +18,46 @@ does not ship fabricated prices, floorsheets, articles, or analysis.
 
 ## Docker Compose stack
 
-The root `docker-compose.yml` runs PostgreSQL, Redis, the Django/Daphne API,
-Next.js, two Celery workers, and one Celery Beat scheduler. From the repository
-root in PowerShell:
+The root `docker-compose.yml` runs Nginx, Next.js, Django/Daphne, Redis, two
+Celery workers, and one Celery Beat scheduler. Nginx is the only published
+service; PostgreSQL is external Supabase. Follow the environment preparation
+and deployment steps in the root [README](../README.md). From the repository
+root:
 
 ```powershell
 Copy-Item .env.example .env
+docker compose config --quiet
 docker compose up --build -d
 docker compose ps
-docker compose logs -f backend celery-worker-1 celery-worker-2 celery-beat
+docker compose logs -f nginx backend celery-worker-1 celery-worker-2 celery-beat
 ```
 
-The backend runs migrations before serving. Create an initial Django
-administrator with:
+The backend runs migrations and collects static assets before Daphne serves
+requests. The frontend calls `/api/` and opens WebSockets at `/ws/` on the same
+origin. Nginx routes `/api/` and `/admin/` to Django, `/static/` and `/media/`
+to shared volumes, `/ws/` to Daphne with upgrade headers, and all other paths
+to Next.js. Redis, frontend, backend, and Celery services are not published.
+Create an initial Django administrator with:
 
 ```powershell
 docker compose exec backend python manage.py createsuperuser
 ```
 
-The Compose stack uses development defaults from `.env.example`. Replace the
-development Django key, database password, and crawler contact before using
-outside a private development environment. The frontend API/WebSocket URLs are
-build arguments, so rebuild the frontend after changing them:
-
-```powershell
-docker compose build frontend
-docker compose up -d frontend
-```
-
-Services are available at `http://localhost:3000` (frontend),
-`http://localhost:8000` (API/Admin), PostgreSQL port `5432`, and Redis port
-`6379`. Compose runs two independent workers, each with concurrency 2, and one
-Beat scheduler. Only one Beat service should run against this schedule.
+Only one Beat instance should run. Redis data, Beat's schedule, and uploaded
+media use named volumes; production hosts must retain these volumes across
+container replacements. The frontend API base is relative and requires no
+backend URL build configuration. With the example local port mapping, the
+application is at `http://localhost:8080`; use the platform's HTTPS domain in
+production. No backend or Redis port is publicly mapped.
 
 ## Native local setup
 
-For running Django and Next.js outside Compose, start only PostgreSQL/Redis
-from the repository root:
+For native backend-only development, supply a development `DATABASE_URL` (or
+omit it to use the local SQLite fallback) and start a local Redis instance:
 
 ```powershell
 Copy-Item backend\.env.example backend\.env
-Copy-Item frontend\.env.example frontend\.env.local
-docker compose up -d postgres redis
+docker run --rm --name nepse-redis -p 6379:6379 redis:7-alpine
 python -m venv backend\.venv
 .\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 Push-Location backend
@@ -85,16 +83,9 @@ In separate terminals, run the API with Daphne, two workers, and Beat from
 .\.venv\Scripts\celery.exe -A config beat --loglevel=info
 ```
 
-Run the frontend from another terminal:
-
-```powershell
-Set-Location frontend
-npm.cmd ci
-npm.cmd run dev
-```
-
 SQLite is a local test fallback. PostgreSQL/Supabase and Redis are expected for
-deployment.
+deployment. For the integrated browser experience, use the Compose Nginx
+entry point so same-origin API and WebSocket routing is available.
 
 ## Development demo seed
 
@@ -130,25 +121,23 @@ review its terms and robots directives before production use.
 
 ## Environment and deployment
 
-Copy `backend\.env.example` to `backend\.env`.
-
 | Variable | Purpose |
 |---|---|
-| `SECRET_KEY` | Django signing secret; set a unique strong value. |
-| `DEBUG` | Development only; production settings force it off. |
-| `ALLOWED_HOSTS` | Comma-separated Django hosts. |
-| `DATABASE_URL` | PostgreSQL/Supabase connection URL; use TLS in production. |
-| `REDIS_URL` | Channels Redis URL. |
-| `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Celery Redis URLs. |
-| `FRONTEND_URL` | CORS and CSRF trusted frontend origin. |
-| `CRAWLER_USER_AGENT` | Identifiable crawler contact information. |
-| `LOG_LEVEL` | Root application log level. |
+| Root `.env` `DJANGO_SECRET_KEY` | Unique random signing key; production requires at least 50 characters. |
+| Root `.env` `DATABASE_URL` | Supabase Session Pooler URI (`aws-0-ap-northeast-1.pooler.supabase.com:5432`) with `sslmode=require`; URL-encode special password characters. |
+| Root `.env` `REDIS_PASSWORD` | URL-safe password for internal Redis and its Celery/Channels URLs. |
+| Root `.env` `PUBLIC_APP_URL` | Public HTTPS origin for the single-domain deployment. |
+| Root `.env` `ALLOWED_HOSTS` | Comma-separated public hostname(s), including localhost for health checks. |
+| Root `.env` `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS` | Allowed origin(s), including scheme. Same-origin browser requests need no cross-site CORS. |
+| Root `.env` `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_HSTS_SECONDS`, `DJANGO_HSTS_INCLUDE_SUBDOMAINS`, `DJANGO_HSTS_PRELOAD` | Production HTTPS and HSTS policy; enable subdomain/preload policies only when appropriate for the domain. |
+| Root `.env` `CRAWLER_USER_AGENT` | Identifiable crawler contact information. |
+| `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND` | Internal URLs assembled by Compose; do not publish Redis. |
 
 Never commit environment files or credentials. Production requires a strong
-secret, explicit hosts, HTTPS origins, TLS database connections, protected
-Redis/network access, secure cookies, and supervised Daphne/Celery processes.
-Run migrations before deployment. The Compose configuration and Dockerfiles are development deployment
-conveniences, not production hardening.
+secret, explicit hosts, TLS-terminated HTTPS, trusted forwarded-protocol
+headers, TLS database connections, internal Redis, secure cookies, and
+persistent media/Redis/Beat volumes. Compose runs migrations and static-file
+collection at backend startup.
 
 ## Authentication and roles
 
@@ -321,7 +310,7 @@ record previous/current tags, analyst, note, and timestamp.
 
 ## WebSocket event contract
 
-Connect through Daphne to `ws://localhost:8000/ws/updates/` with an access token in the
+Connect through the same public origin at `/ws/updates/` with an access token in the
 WebSocket subprotocols `nepse-insight` and
 `nepse-insight.bearer.<access-token>`; use `wss://` in production. Do not send
 tokens in the URL. Invalid/expired tokens are rejected with close code `4401`.

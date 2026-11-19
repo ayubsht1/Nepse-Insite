@@ -26,14 +26,9 @@ class NepseWebSocketService {
   private shouldReconnect = true;
 
   private getWsUrl(): string {
-    const configuredUrl = process.env.NEXT_PUBLIC_WS_URL;
-    if (configuredUrl) {
-      return configuredUrl;
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    return `${protocol}//${host}/ws/updates/`;
+    const url = new URL('/ws/updates/', window.location.origin);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url.toString();
   }
 
   public connect(): void {

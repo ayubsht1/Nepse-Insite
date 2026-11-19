@@ -5,10 +5,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN groupadd --system app && useradd --system --gid app --create-home app
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY --chown=app:app . .
+RUN mkdir -p /app/staticfiles /app/media /var/lib/celerybeat \
+    && chown -R app:app /app/staticfiles /app/media /var/lib/celerybeat
+
+USER app
 
 EXPOSE 8000
 

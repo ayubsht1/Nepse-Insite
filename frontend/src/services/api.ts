@@ -4,12 +4,7 @@ import axios, {
   InternalAxiosRequestConfig,
 } from 'axios';
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  (process.env.NODE_ENV === 'development'
-    ? 'http://localhost:8000/api'
-    : '/api')
-).replace(/\/$/, '');
+const API_BASE_URL = '/api';
 const ACCESS_TOKEN_KEY = 'auth_token';
 const LEGACY_REFRESH_TOKEN_KEY = 'refresh_token';
 

@@ -121,14 +121,33 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Kathmandu"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_URL = "/static/"
+STATIC_ROOT = Path(os.getenv("STATIC_ROOT", str(BASE_DIR / "staticfiles")))
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "media")))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-CORS_ALLOWED_ORIGINS = [FRONTEND_URL]
+
+def _environment_list(name, default):
+    return [
+        item.strip().rstrip("/")
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    ]
+
+
+FRONTEND_URL = os.getenv(
+    "PUBLIC_APP_URL", os.getenv("FRONTEND_URL", "http://localhost:3000")
+).rstrip("/")
+CORS_ALLOWED_ORIGINS = _environment_list(
+    "CORS_ALLOWED_ORIGINS", FRONTEND_URL
+)
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [FRONTEND_URL]
+CSRF_TRUSTED_ORIGINS = _environment_list(
+    "CSRF_TRUSTED_ORIGINS", FRONTEND_URL
+)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CHANNEL_LAYERS = {
