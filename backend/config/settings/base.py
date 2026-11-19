@@ -6,7 +6,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(BASE_DIR / ".env")
+if os.getenv("DJANGO_SETTINGS_MODULE", "config.settings.development") == (
+    "config.settings.development"
+):
+    load_dotenv(BASE_DIR / ".env", override=False)
 
 SECRET_KEY = os.getenv(
     "SECRET_KEY", "unsafe-development-key-not-for-production-32bytes"
@@ -78,7 +81,14 @@ if not database_url_value:
         }
     }
 else:
-    database_url = urlparse(database_url_value)
+    try:
+        database_url = urlparse(database_url_value)
+        database_host = database_url.hostname
+        database_port = database_url.port or 5432
+    except ValueError:
+        raise ValueError(
+            "DATABASE_URL is invalid; URL-encode reserved characters in credentials."
+        ) from None
 
 if database_url_value and database_url.scheme in {"postgres", "postgresql"}:
     database_query = parse_qs(database_url.query)
@@ -91,8 +101,8 @@ if database_url_value and database_url.scheme in {"postgres", "postgresql"}:
             "NAME": unquote(database_url.path.lstrip("/")),
             "USER": unquote(database_url.username or ""),
             "PASSWORD": unquote(database_url.password or ""),
-            "HOST": database_url.hostname or "localhost",
-            "PORT": database_url.port or 5432,
+            "HOST": database_host or "localhost",
+            "PORT": database_port,
             "CONN_MAX_AGE": 60,
             "OPTIONS": database_options,
         }

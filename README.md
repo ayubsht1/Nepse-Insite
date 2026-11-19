@@ -111,7 +111,8 @@ fails. Celery workers and Beat are deliberately not started in the Web Service.
 
 In Render, create a **Web Service** from this repository, select **Docker**,
 and leave the Dockerfile path at `./Dockerfile`. Add these environment variables
-to the Web Service without committing their values:
+to the Web Service's Environment settings without committing their values;
+Render does not need or use an uploaded `.env` file:
 
 - `SECRET_KEY`: unique Django key of at least 50 characters.
 - `DATABASE_URL`: Supabase PostgreSQL connection URL with `sslmode=require`.
@@ -122,10 +123,15 @@ to the Web Service without committing their values:
 - `PUBLIC_APP_URL`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: the public
   HTTPS origin, for example `https://your-service.onrender.com`.
 - `CRAWLER_USER_AGENT`: a crawler identifier with a real contact address.
-- `SECURE_SSL_REDIRECT=True`; optionally set `SECURE_HSTS_SECONDS`,
+- Optionally set `SECURE_SSL_REDIRECT=True`, `DEBUG=False`,
+  `SECURE_HSTS_SECONDS`,
   `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD`, and `LOG_LEVEL`.
 
 Render supplies `PORT`; do not override it unless required by the service.
+The Web Service image selects `config.settings.production`; set that value as
+`DJANGO_SETTINGS_MODULE` on each Background Worker because its backend image
+defaults to development settings. Django reads service configuration directly
+from the process environment; only native development loads `backend/.env`.
 `STATIC_ROOT` and `MEDIA_ROOT` default to `/srv/static` and `/srv/media`.
 Static files are collected at startup. The container filesystem is ephemeral:
 if the application stores uploads locally, attach a persistent Render Disk at a
@@ -134,7 +140,8 @@ object storage for uploads.
 
 Create separate Render **Background Worker** services from the `backend/`
 directory using `backend/Dockerfile` and the same Django, Supabase, and Redis
-environment values. Set one worker's Docker Command to
+environment values, including `DJANGO_SETTINGS_MODULE=config.settings.production`.
+Set one worker's Docker Command to
 `celery -A config worker --loglevel=info --concurrency=2`. Create exactly one
 additional worker for Beat with Docker Command
 `celery -A config beat --loglevel=info`. Do not run multiple Beat instances.
