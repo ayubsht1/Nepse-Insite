@@ -12,6 +12,7 @@ import {
   fetchCompanies,
   fetchCrawlRuns,
   fetchCrawlSources,
+  fetchMarketAnalysis,
   triggerCrawlRun,
   updateCompany,
   updateUserRole,
@@ -38,6 +39,12 @@ export const AdminPanelView: React.FC = () => {
     queryKey: ['crawl-runs'],
     queryFn: () => fetchCrawlRuns(),
     refetchInterval: activeTab === 'crawls' ? 5000 : false,
+  });
+  const marketDataQuery = useQuery({
+    queryKey: ['market-analysis', 'admin'],
+    queryFn: () => fetchMarketAnalysis('7d'),
+    enabled: activeTab === 'crawls',
+    refetchInterval: activeTab === 'crawls' ? 30000 : false,
   });
   const sourcesQuery = useQuery({
     queryKey: ['crawl-sources'],
@@ -128,7 +135,7 @@ export const AdminPanelView: React.FC = () => {
   const sources = sourcesQuery.data ?? [];
   const companies = companiesQuery.data?.results ?? [];
   const users = usersQuery.data ?? [];
-  const error = [runsQuery, sourcesQuery, companiesQuery, usersQuery].find(
+  const error = [runsQuery, marketDataQuery, sourcesQuery, companiesQuery, usersQuery].find(
     (query) => query.isError,
   )?.error;
 
@@ -136,7 +143,7 @@ export const AdminPanelView: React.FC = () => {
     <div className="space-y-5">
       <PageHeader
         title="Administration"
-        description="Manage application roles, company records, and configured news crawls. The backend remains authoritative for all permissions."
+        description="Manage application roles, company records, and monitor news and market collection freshness. The backend remains authoritative for all permissions."
         icon={ShieldCheck}
       />
       <nav className="flex flex-wrap gap-2" aria-label="Administration sections">
@@ -163,6 +170,19 @@ export const AdminPanelView: React.FC = () => {
 
       {activeTab === 'crawls' && (
         <section className="space-y-4">
+          {marketDataQuery.data && (
+            <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm dark:border-slate-800 dark:bg-[#111827]">
+              Market data:{' '}
+              <span className="font-semibold capitalize">
+                {marketDataQuery.data.freshness.status}
+              </span>
+              {marketDataQuery.data.freshness.updated_at
+                ? ` · Last updated ${new Date(
+                    marketDataQuery.data.freshness.updated_at,
+                  ).toLocaleString()}`
+                : ' · No market data has been collected'}
+            </p>
+          )}
           <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-[#111827] sm:flex-row sm:items-end">
             <label className="flex-1 text-sm">
               Enabled source
@@ -388,7 +408,7 @@ function CrawlRunTable({ runs }: { runs: ApiCrawlRun[] }) {
       <table className="w-full text-left text-xs">
         <thead>
           <tr className="bg-slate-50 dark:bg-[#0e1422]">
-            {['Source', 'Status', 'Started', 'Articles', 'Duplicates', 'Errors'].map(
+            {['Type', 'Source', 'Status', 'Started', 'Finished', 'Created', 'Updated', 'Articles', 'Duplicates', 'Errors'].map(
               (heading) => (
                 <th key={heading} className="px-3 py-2">{heading}</th>
               ),
@@ -398,11 +418,17 @@ function CrawlRunTable({ runs }: { runs: ApiCrawlRun[] }) {
         <tbody>
           {runs.map((run) => (
             <tr key={run.id} className="border-t border-slate-200 dark:border-slate-800">
+              <td className="px-3 py-2 capitalize">{run.collection_type.replace(/_/g, ' ')}</td>
               <td className="px-3 py-2">{run.source_name || 'Removed source'}</td>
               <td className="px-3 py-2 capitalize">{run.status}</td>
               <td className="px-3 py-2">
                 {run.started_at ? new Date(run.started_at).toLocaleString() : 'Not started'}
               </td>
+              <td className="px-3 py-2">
+                {run.finished_at ? new Date(run.finished_at).toLocaleString() : '—'}
+              </td>
+              <td className="px-3 py-2">{run.records_created}</td>
+              <td className="px-3 py-2">{run.records_updated}</td>
               <td className="px-3 py-2">{run.articles_created}</td>
               <td className="px-3 py-2">{run.articles_duplicates}</td>
               <td className="max-w-sm px-3 py-2 text-rose-600">{run.error_message || '—'}</td>

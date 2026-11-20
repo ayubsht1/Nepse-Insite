@@ -97,7 +97,7 @@ def collect_sharesansar_market_data():
             SHARESANSAR_BASE,
         )
     parsed = _parse_sharesansar(market_html, stocks_html)
-    _save_snapshot(parsed)
+    persisted = _save_snapshot(parsed)
     logger.info(
         "Saved ShareSansar market snapshot for %s: %s indices, %s stocks",
         parsed["date"],
@@ -109,6 +109,7 @@ def collect_sharesansar_market_data():
         "date": parsed["date"].isoformat(),
         "indices": len(parsed["indices"]),
         "stocks": len(parsed["stocks"]),
+        **persisted,
     }
 
 
@@ -129,7 +130,7 @@ def collect_merolagani_market_data():
             MEROLAGANI_BASE,
         )
     parsed = _parse_merolagani(html)
-    _save_snapshot(parsed)
+    persisted = _save_snapshot(parsed)
     logger.info(
         "Saved Merolagani market snapshot for %s: %s stocks",
         parsed["date"],
@@ -139,6 +140,7 @@ def collect_merolagani_market_data():
         "source": MEROLAGANI,
         "date": parsed["date"].isoformat(),
         "stocks": len(parsed["stocks"]),
+        **persisted,
     }
 
 
@@ -164,7 +166,14 @@ def collect_merolagani_floorsheet_data():
         saved["duplicates"],
         saved["unmatched"],
     )
-    return {"source": MEROLAGANI, **saved, "submitted": len(rows)}
+    return {
+        "source": MEROLAGANI,
+        **saved,
+        "submitted": len(rows),
+        "records_created": saved["created"],
+        "records_updated": 0,
+        "records_processed": len(rows),
+    }
 
 
 def collect_sharesansar_index_history():
@@ -266,8 +275,15 @@ def collect_sharesansar_index_history():
                 time.sleep(0.25)
 
     parsed = _parse_sharesansar_index_history(rows)
+    created = 0
+    updated = 0
     if parsed:
         updated_at = timezone.now()
+        existing_count = MarketIndexSnapshot.objects.filter(
+            source=SHARESANSAR,
+            symbol="NEPSE",
+            date__in=[row["date"] for row in parsed],
+        ).count()
         with transaction.atomic():
             MarketIndexSnapshot.objects.bulk_create(
                 [
@@ -301,8 +317,16 @@ def collect_sharesansar_index_history():
                     "updated_at",
                 ],
             )
+        created = len(parsed) - existing_count
+        updated = existing_count
     logger.info("Saved %s ShareSansar historical NEPSE index records", len(parsed))
-    return {"source": SHARESANSAR, "records": len(parsed)}
+    return {
+        "source": SHARESANSAR,
+        "records": len(parsed),
+        "records_created": created,
+        "records_updated": updated,
+        "records_processed": len(parsed),
+    }
 
 
 def collect_sharesansar_company_directory(limit=None):

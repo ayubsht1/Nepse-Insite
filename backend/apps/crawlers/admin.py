@@ -12,6 +12,14 @@ class CrawlSourceAdmin(admin.ModelAdmin):
 
 @admin.register(CrawlRun)
 class CrawlRunAdmin(admin.ModelAdmin):
-    list_display = ["id", "source", "status", "articles_created", "created_at"]
-    list_filter = ["status", "source"]
+    list_display = [
+        "id",
+        "collection_type",
+        "source",
+        "collection_source",
+        "status",
+        "started_at",
+        "finished_at",
+    ]
+    list_filter = ["collection_type", "status", "source"]
     readonly_fields = [field.name for field in CrawlRun._meta.fields]

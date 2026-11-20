@@ -128,17 +128,37 @@ def collect_sharesansar_company_history_data():
     companies = Company.objects.filter(is_active=True).order_by("symbol")
     results = []
     failed = 0
+    errors = []
+    records_created = 0
+    records_updated = 0
     for company in companies:
         try:
-            results.append(collect_sharesansar_company_history(company))
-        except (httpx.HTTPError, MarketDataProviderError):
+            result = collect_sharesansar_company_history(company)
+            results.append(result)
+            records_created += result["prices"]["created"]
+            records_updated += result["prices"]["updated"]
+            records_created += result["floorsheet"]["created"]
+        except (httpx.HTTPError, MarketDataProviderError) as exc:
             failed += 1
-            backfill_company_prices(company)
+            backfill = backfill_company_prices(company)
+            records_created += backfill["created"]
+            records_updated += backfill["updated"]
+            errors.append(f"{company.symbol}: {exc}")
             logger.exception(
                 "ShareSansar historical collection failed for %s",
                 company.symbol,
             )
-    return {"companies": len(results), "failed": failed, "results": results}
+    return {
+        "status": "partial" if failed else "collected",
+        "companies": companies.count(),
+        "companies_collected": len(results),
+        "failed": failed,
+        "errors": errors,
+        "records_created": records_created,
+        "records_updated": records_updated,
+        "records_processed": records_created + records_updated,
+        "results": results,
+    }
 
 
 @shared_task
@@ -149,4 +169,10 @@ def sync_sharesansar_company_directory():
         logger.exception("ShareSansar company-directory sync failed")
         raise
     logger.info("ShareSansar company-directory sync: %s", result)
-    return result
+    return {
+        **result,
+        "status": "collected",
+        "records_created": result["created"],
+        "records_updated": result.get("updated", 0),
+        "records_processed": result["created"] + result.get("updated", 0),
+    }

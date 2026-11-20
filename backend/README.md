@@ -112,11 +112,10 @@ commands.
 
 ## Listed company directory
 
-The `sync_companies` command adds real company names, symbols, and sectors from
-ShareSansar's public company list until the active directory reaches the target
-(10 by default). It does not create prices or floorsheet transactions. Run it
-manually with `python manage.py sync_companies --target 10`; local Compose Beat
-checks the target after market close, while Render uses the GitHub Actions
+The `sync_sharesansar_company_directory` service adds actual company names,
+symbols, and sectors from ShareSansar's public company list; it does not create
+prices or floorsheet transactions. It is included in `historical_market`,
+before company-history collection, and remains callable through the legacy
 `company-directory` operation. This public page is not a documented API;
 review its terms and robots directives before production use.
 
@@ -261,6 +260,31 @@ genuine data rather than making it up.
 
 ## Market collection
 
+The unified command executes the existing services directly and synchronously;
+it does not enqueue tasks or require a Render Celery worker. Supported
+operations are:
+
+| Operation | Work performed |
+|---|---|
+| `news` | Enabled news crawlers; reuses queued runs and creates a run only when no queued run exists for that source. |
+| `live_market` | NEPSE Alpha, ShareSansar, Merolagani market snapshots, and Merolagani floorsheet; then analysis if a source succeeds. |
+| `historical_market` | Company directory, ShareSansar index history, company OHLCV/floorsheet history; then analysis if a source succeeds. |
+| `market_analysis` | Summarizes saved market data; skips clearly if no usable records exist. |
+| `all` | Runs news, live market, historical market, and analysis in dependency order, continuing after a source/operation failure and reporting failures at the end. |
+
+Run any operation from this directory with `python manage.py run_collection
+<operation>`. For news, optional `--source-keys key1,key2` selects enabled
+crawler keys. For market operations, optional
+`--market-source-keys nepsealpha,sharesansar,merolagani` selects providers;
+provider-specific history keys are also accepted. Optional `--run-ids 1,2` is
+reserved for explicit queued news runs and rejects IDs that do not exist;
+scheduled workflow calls omit it. `--source-keys` and `--run-ids` cannot be
+used together. The command uses a
+PostgreSQL advisory lock to reject overlapping jobs and creates
+`CrawlRun` records for each source with status, timestamps, record counters,
+and error details. Provider network errors receive bounded retries; one
+provider failure does not stop the remaining providers.
+
 Market-data collection is independent of the news crawler. It reads
 `https://www.nepsealpha.com/live/stocks` for index/sector values, stock market
 rows, breadth, turnover, leaders, and intraday NEPSE index points, and
@@ -272,12 +296,14 @@ endpoints and HTML pages are public website resources, not documented or
 guaranteed APIs; terms and response formats may change. Collection checks each
 HTML provider's `robots.txt` before requesting its market pages.
 
-The GitHub Actions `market-data` operation runs every 15 minutes Sunday–Thursday
-from 11:00 through 15:00 Asia/Kathmandu on Render; local Compose retains the
-Celery Beat schedule. Tasks avoid requests outside that window and the
-ShareSansar/Merolagani tasks also stop for the day after NEPSE Alpha reports the
-market closed. Merolagani floorsheet rows are collected on the same schedule
-and deduplicated by transaction ID. Its public page currently exposes a
+GitHub Actions runs `live_market` every 15 minutes Sunday–Thursday from
+11:00–15:00 NPT (UTC 05:15–09:15) and `historical_market` at 15:05 NPT (UTC
+09:20). News runs every four hours. The workflow is serialized at repository
+scope, and the command also acquires a PostgreSQL advisory lock. Local Compose
+retains its separate Celery Beat schedule. Tasks avoid requests outside
+market hours; ShareSansar/Merolagani tasks also stop for the day after NEPSE
+Alpha reports the market closed. Merolagani floorsheet rows are collected on
+the live schedule and deduplicated by transaction ID. Its public page currently exposes a
 paginated first page of up to 500 transactions; VWAP and broker statistics use
 the rows actually stored and report this coverage limitation. ShareSansar's
 NEPSE index-history page is queried daily for up to ten years; historical rows
@@ -300,6 +326,12 @@ confirmed. ShareSansar/Merolagani HTML parsing is limited to fields present in
 their market pages. Per-provider snapshots remain separate; the overview
 presents each provider's latest quotes while company price records select the
 highest-priority available source.
+
+`MarketSnapshot` and other source rows retain provider/source timestamps.
+`/api/market-data/analysis/` computes NEPSE history and market metrics from
+stored records, and reports freshness as unavailable/fresh/stale using a
+24-hour threshold. Missing fields are not synthesized. The frontend displays
+empty states when the API has no source data.
 
 ## Market calculations and limits
 

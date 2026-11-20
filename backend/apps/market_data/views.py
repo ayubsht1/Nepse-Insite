@@ -10,6 +10,12 @@ from rest_framework.views import APIView
 from common.events import broadcast_on_commit
 from common.permissions import IsAdminRole
 from common.date_ranges import parse_date_range
+from .analysis import (
+    daily_nepse_history as _daily_nepse_history,
+    latest_market_data_updated_at,
+    market_data_freshness,
+    market_history_metrics as _market_history_metrics,
+)
 from .models import (
     MarketIndexHistory,
     MarketIndexSnapshot,
@@ -27,114 +33,6 @@ from .serializers import (
     PriceImportSerializer,
     StockPriceSerializer,
 )
-
-INDEX_SOURCE_PRIORITY = {
-    "nepsealpha": 0,
-    "sharesansar": 1,
-    "merolagani": 2,
-}
-
-
-def _daily_nepse_history(end_date):
-    history_by_date = {}
-    source_filter = list(INDEX_SOURCE_PRIORITY)
-    for row in MarketIndexSnapshot.objects.filter(
-        source__in=source_filter,
-        symbol="NEPSE",
-        close_value__isnull=False,
-        date__lte=end_date,
-    ).order_by("date", "updated_at"):
-        candidate = {
-            "date": row.date,
-            "value": row.close_value,
-            "change_percent": row.change_percent,
-            "updated_at": row.updated_at,
-            "source": row.source,
-        }
-        existing = history_by_date.get(row.date)
-        if existing is None or INDEX_SOURCE_PRIORITY[row.source] < INDEX_SOURCE_PRIORITY[
-            existing["source"]
-        ]:
-            history_by_date[row.date] = candidate
-
-    for row in MarketSnapshot.objects.filter(
-        source__in=source_filter,
-        index_value__isnull=False,
-        date__lte=end_date,
-    ).order_by("date", "updated_at"):
-        candidate = {
-            "date": row.date,
-            "value": row.index_value,
-            "change_percent": row.index_change_percent,
-            "updated_at": row.updated_at,
-            "source": row.source,
-        }
-        existing = history_by_date.get(row.date)
-        if existing is None or INDEX_SOURCE_PRIORITY[row.source] <= INDEX_SOURCE_PRIORITY[
-            existing["source"]
-        ]:
-            history_by_date[row.date] = candidate
-
-    points = []
-    previous_value = None
-    for row in sorted(history_by_date.values(), key=lambda item: item["date"]):
-        change_percent = row["change_percent"]
-        if change_percent is None and previous_value:
-            change_percent = (
-                (row["value"] - previous_value)
-                / previous_value
-                * Decimal("100")
-            ).quantize(Decimal("0.0001"))
-        points.append(
-            {
-                "date": row["date"],
-                "value": row["value"],
-                "change_percent": change_percent,
-                "updated_at": row["updated_at"],
-            }
-        )
-        previous_value = row["value"]
-    return points
-
-
-def _market_history_metrics(points):
-    returns = [
-        (current["value"] - previous["value"])
-        / previous["value"]
-        * Decimal("100")
-        for previous, current in zip(points, points[1:])
-        if previous["value"]
-    ]
-    volatility = None
-    if len(returns) >= 2:
-        mean = sum(returns, Decimal("0")) / len(returns)
-        variance = sum(
-            ((value - mean) ** 2 for value in returns),
-            Decimal("0"),
-        ) / len(returns)
-        volatility = variance.sqrt().quantize(Decimal("0.0001"))
-    change = None
-    if len(points) >= 2 and points[0]["value"]:
-        change = (
-            (points[-1]["value"] - points[0]["value"])
-            / points[0]["value"]
-            * Decimal("100")
-        )
-    return {
-        "trend": (
-            "up"
-            if change is not None and change > 0
-            else "down"
-            if change is not None and change < 0
-            else "flat"
-            if change is not None
-            else None
-        ),
-        "daily_volatility_percent": (
-            str(volatility) if volatility is not None else None
-        ),
-    }
-
 
 class StockPriceListView(generics.ListAPIView):
     serializer_class = StockPriceSerializer
@@ -273,6 +171,9 @@ class MarketAnalysisOverviewView(APIView):
                         stocks, many=True
                     ).data,
                     "top_volume": top_volume,
+                    "freshness": market_data_freshness(
+                        latest_market_data_updated_at()
+                    ),
                 }
             )
 
@@ -311,6 +212,9 @@ class MarketAnalysisOverviewView(APIView):
                 "indices": MarketIndexSnapshotSerializer(indices, many=True).data,
                 "stocks": MarketStockSnapshotSerializer(stocks, many=True).data,
                 "top_volume": top_volume,
+                "freshness": market_data_freshness(
+                    latest_market_data_updated_at()
+                ),
             }
         )
 

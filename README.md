@@ -154,14 +154,29 @@ database must accept connections from GitHub-hosted runners; no live database
 connection has been tested here.
 
 To run a job manually, open **Actions → NEPSE data jobs → Run workflow** and
-choose `market-data`, `company-history`, `index-history`, `company-directory`,
-or `news`. For news, optionally enter comma-separated enabled source keys such
-as `sharesansar`; blank selects enabled sources. The Django admin crawl button
-uses the same workflow automatically. Scheduled news runs do not pass database
-IDs: the command reuses queued `CrawlRun` records and creates runs for enabled
-sources that do not already have a queued run. The optional `crawl_run_ids`
-input is only for explicit runs (such as admin-dispatched runs); deleted or
-unknown IDs are rejected with an error naming the missing IDs.
+choose `news`, `live_market`, `historical_market`, `market_analysis`, or `all`.
+The older `market-data`, `company-history`, `index-history`, and
+`company-directory` operation names remain available. `source_keys` selects
+enabled news crawler keys; `market_source_keys` selects market providers
+(`nepsealpha`, `sharesansar`, `merolagani`) or a specific history collector.
+Blank source inputs select all applicable enabled/implemented sources.
+`crawl_run_ids` is optional and only for explicit queued news runs. Unknown or
+deleted IDs are rejected with an error naming the missing IDs. Scheduled jobs
+never supply database IDs. The Django admin crawl button dispatches the same
+workflow.
+
+The management command can also run locally from `backend\`:
+
+```powershell
+python manage.py run_collection news
+python manage.py run_collection live_market
+python manage.py run_collection historical_market
+python manage.py run_collection market_analysis
+python manage.py run_collection all
+```
+
+These commands call the existing collection services synchronously; a running
+Celery worker is not required.
 
 The optional `run_legacy_queue_worker` input is only for explicitly processing
 old Celery messages. It requires a `CELERY_BROKER_URL` Actions secret reachable
@@ -172,12 +187,22 @@ scheduled/manual collection never starts this worker.
 
 ### Scheduling and free-tier limits
 
-The workflow converts the existing Kathmandu schedule to UTC: market collection
-every 15 minutes during the configured Sunday–Thursday market window, news
-every four hours, company-directory sync at 15:05 NPT, index history at 15:15,
-and company history at 15:45. GitHub cron is best-effort and may be delayed or
-skipped; collection tasks also retain their market-hours and trading-day
-guards.
+GitHub Actions cron is UTC. The workflow schedules news every four hours,
+`live_market` every 15 minutes during the current Sunday–Thursday
+11:00–15:00 Nepal Standard Time window (UTC 05:15–09:15), and
+`historical_market` at 15:05 NPT (UTC 09:20) on Sunday–Thursday. The live
+schedule includes the UTC cron slots that align with that window; market-hours
+and trading-day guards remain in the existing tasks. Live collection is
+followed by market analysis only when at least one source succeeds;
+`historical_market` backfills the company directory before index and company
+history, then refreshes analysis when data collection succeeds. GitHub cron is
+best-effort and may be delayed or skipped.
+
+Each operation records source, type, start/completion time, status, record
+counts, and error details in `CrawlRun`. The analysis API reports market-data
+freshness as unavailable, fresh, or stale (24-hour threshold); it calculates
+from stored records and returns empty/unavailable values when source data is
+absent.
 
 This schedule creates roughly 600 workflow runs per month before manual
 triggers. Dependency caching reduces repeated setup, but actual included-minute
@@ -196,6 +221,9 @@ timing or a particular monthly free-minute allowance.
 - **Crawlers:** check that selected sources are enabled, a `CrawlRun` moves
   through `queued` and `running` to `succeeded` (or `partial` when robots rules
   disallow access), and the logs report extracted/created/duplicate counts.
+- **Market collection:** inspect the per-source `CrawlRun` rows for
+  `live_market`, `historical_market`, and `market_analysis`; a workflow can be
+  successful while individual sources are skipped outside market hours.
 - **Market data:** confirm fresh rows and timestamps in the existing market
   tables and that the analysis API reflects them.
 - **Database:** verify the expected rows in Supabase; a successful Actions
@@ -281,16 +309,16 @@ volume.
 The Market Analysis overview collects public NEPSE Alpha JSON from `/live/stocks`
 and `/trading-ta`, ShareSansar's `/market` and `/today-share-price` pages, and
 Merolagani's `/LatestMarket.aspx` page. These are website endpoints/pages, not
-documented or guaranteed APIs. On Render, GitHub Actions runs the synchronous
-`market-data` operation every 15 minutes during the Sunday–Thursday
-11:00–15:00 Nepal-time session; local Compose retains Celery Beat. Complete
-company OHLCV rows are matched to active companies by symbol and upserted by
-company/date; NEPSE Alpha is preferred over ShareSansar and Merolagani when
-their same-day prices differ. Incomplete or unmatched rows are skipped and
-logged. After market close, GitHub Actions runs the index-history,
-company-directory, and company-history operations. The history collectors
-paginate the provider's 50-row tables, preserve provider dates and values, and
-upsert into `MarketIndexSnapshot`, `StockPrice`, and `FloorsheetTransaction`.
+documented or guaranteed APIs. On Render, GitHub Actions runs synchronous
+`live_market` collection every 15 minutes during the Sunday–Thursday
+11:00–15:00 Nepal-time session and `historical_market` at 15:05 NPT; local
+Compose retains Celery Beat. Complete company OHLCV rows are matched to active
+companies by symbol and upserted by company/date; NEPSE Alpha is preferred over
+ShareSansar and Merolagani when their same-day prices differ. Incomplete or
+unmatched rows are skipped and logged. Historical collectors include directory
+synchronization and paginate provider history, preserving provider dates and
+values while upserting into `MarketIndexSnapshot`, `StockPrice`, and
+`FloorsheetTransaction`.
 Later runs refresh recent company history and daily floorsheet records.
 Merolagani's paginated floorsheet page remains an independent source; it
 currently exposes up to 500 rows per page, so VWAP/broker analysis may cover

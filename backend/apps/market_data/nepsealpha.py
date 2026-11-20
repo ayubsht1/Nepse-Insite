@@ -62,7 +62,7 @@ def collect_market_data():
                 )
 
     parsed["technical_indicators"] = technical
-    _save_snapshot(parsed)
+    persisted = _save_snapshot(parsed)
     logger.info(
         "Saved NEPSE Alpha market snapshot for %s: %s index points, %s stock rows",
         parsed["date"],
@@ -74,6 +74,7 @@ def collect_market_data():
         "market_open": parsed["market_open"],
         "index_points": len(parsed["history"]),
         "stocks": len(parsed["stocks"]),
+        **persisted,
     }
 
 
@@ -400,7 +401,7 @@ def _save_snapshot(data):
             ).values_list("technical_indicators", flat=True).first()
             if previous_technical:
                 data["technical_indicators"] = previous_technical
-        MarketSnapshot.objects.update_or_create(
+        _, snapshot_created = MarketSnapshot.objects.update_or_create(
             source=source,
             date=date,
             defaults={
@@ -449,6 +450,11 @@ def _save_snapshot(data):
             )
             for row in index_rows.values()
         ]
+        existing_index_count = MarketIndexSnapshot.objects.filter(
+            source=source,
+            date=date,
+            symbol__in=index_rows,
+        ).count()
         if indices:
             MarketIndexSnapshot.objects.bulk_create(
                 indices,
@@ -491,6 +497,11 @@ def _save_snapshot(data):
             )
             for row in stock_rows.values()
         ]
+        existing_stock_count = MarketStockSnapshot.objects.filter(
+            source=source,
+            date=date,
+            symbol__in=stock_rows,
+        ).count()
         if stocks:
             MarketStockSnapshot.objects.bulk_create(
                 stocks,
@@ -549,6 +560,11 @@ def _save_snapshot(data):
             for point in history_by_time.values()
             if history_cutoff is None or point["observed_at"] >= history_cutoff
         ]
+        existing_history_count = MarketIndexHistory.objects.filter(
+            source=source,
+            symbol="NEPSE",
+            observed_at__in=[point.observed_at for point in history],
+        ).count()
         if history:
             MarketIndexHistory.objects.bulk_create(
                 history,
@@ -556,3 +572,26 @@ def _save_snapshot(data):
                 unique_fields=["source", "symbol", "observed_at"],
                 update_fields=["value"],
             )
+        return {
+            "records_created": (
+                int(snapshot_created)
+                + len(indices)
+                - existing_index_count
+                + len(stocks)
+                - existing_stock_count
+                + price_result["created"]
+                + len(history)
+                - existing_history_count
+            ),
+            "records_updated": (
+                int(not snapshot_created)
+                + existing_index_count
+                + existing_stock_count
+                + price_result["updated"]
+                + existing_history_count
+            ),
+            "records_processed": (
+                1 + len(indices) + len(stocks) + len(history)
+                + price_result["created"] + price_result["updated"]
+            ),
+        }

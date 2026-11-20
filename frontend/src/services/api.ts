@@ -117,14 +117,19 @@ export interface ApiCrawlRun {
   id: number;
   source: number | null;
   source_name: string | null;
+  collection_type: 'news' | 'live_market' | 'historical_market' | 'market_analysis';
+  collection_source: string;
   triggered_by: string | null;
-  status: 'queued' | 'running' | 'succeeded' | 'partial' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'partial' | 'failed' | 'skipped';
   task_id: string;
   started_at: string | null;
   finished_at: string | null;
   requests_made: number;
   articles_created: number;
   articles_duplicates: number;
+  records_created: number;
+  records_updated: number;
+  records_processed: number;
   error_message: string;
   created_at: string;
 }
@@ -247,6 +252,11 @@ export interface ApiMarketStock {
 
 export interface ApiMarketAnalysis {
   snapshot: ApiMarketSnapshot | null;
+  freshness: {
+    status: 'fresh' | 'stale' | 'unavailable';
+    updated_at: string | null;
+    age_minutes: number | null;
+  };
   history: Array<{
     date: string;
     value: string;
