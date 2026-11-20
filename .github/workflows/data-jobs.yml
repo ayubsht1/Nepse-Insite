@@ -104,9 +104,11 @@ jobs:
           SOURCE_KEYS: ${{ inputs.source_keys }}
           CRAWL_RUN_IDS: ${{ inputs.crawl_run_ids }}
         run: |
-          python manage.py run_collection "$OPERATION" \
-            --source-keys "$SOURCE_KEYS" \
-            --run-ids "$CRAWL_RUN_IDS"
+          args=(python manage.py run_collection "$OPERATION" --source-keys "$SOURCE_KEYS")
+          if [[ -n "${CRAWL_RUN_IDS//[[:space:]]/}" ]]; then
+            args+=(--run-ids "$CRAWL_RUN_IDS")
+          fi
+          "${args[@]}"
       - name: Process bounded legacy Celery queue
         if: github.event_name == 'workflow_dispatch' && inputs.run_legacy_queue_worker
         env:

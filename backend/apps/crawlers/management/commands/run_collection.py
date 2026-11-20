@@ -127,7 +127,14 @@ class Command(BaseCommand):
                 .order_by("pk")
             )
             if len(runs) != len(run_ids):
-                raise CommandError("One or more CrawlRun IDs do not exist.")
+                found_ids = {run.pk for run in runs}
+                missing_ids = [
+                    run_id for run_id in run_ids if run_id not in found_ids
+                ]
+                raise CommandError(
+                    "CrawlRun ID(s) do not exist: "
+                    + ", ".join(str(run_id) for run_id in missing_ids)
+                )
             if any(run.status != CrawlRun.Status.QUEUED for run in runs):
                 raise CommandError("Only queued CrawlRuns can be executed.")
         elif source_keys:

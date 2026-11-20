@@ -246,6 +246,12 @@ On Render, GitHub Actions invokes
 `python manage.py run_collection news`; the command executes crawler tasks
 synchronously and does not enqueue through Redis. The admin crawl endpoint
 dispatches that workflow and the command updates its `CrawlRun` records.
+Scheduled news does not depend on stored run IDs: it executes queued runs and
+creates new `CrawlRun` rows for enabled sources that have no queued run.
+Explicit `--run-ids` values remain supported for admin/manual operations and
+must identify existing queued records; missing IDs are reported explicitly.
+The workflow omits `--run-ids` when its input is blank, so database resets do
+not leave scheduled jobs tied to stale IDs.
 Local Compose retains the existing Celery Beat schedule for enabled sources.
 Redis connectivity and task autodiscovery were verified locally; no real source
 crawl was run and no live article persistence is claimed. Import genuine OHLCV and floorsheet data
