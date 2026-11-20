@@ -47,7 +47,9 @@ export interface ApiStockPrice {
   close_price: string;
   change_amount: string | null;
   change_percent: string | null;
+  previous_close: string | null;
   volume: number;
+  turnover: string | null;
   source: string;
   updated_at: string;
 }
@@ -186,6 +188,7 @@ export interface ApiMarketLeader {
   name: string;
   change_percent?: number | string | null;
   turnover_crore?: number | string | null;
+  volume?: number | string | null;
 }
 
 export interface ApiMarketSnapshot {
@@ -235,9 +238,11 @@ export interface ApiMarketStock {
   low_price: string | null;
   close_price: string | null;
   change_amount: string | null;
+  previous_close: string | null;
   change_percent: string | null;
   turnover: string | null;
   volume: string | null;
+  updated_at: string;
 }
 
 export interface ApiMarketAnalysis {
@@ -254,12 +259,15 @@ export interface ApiMarketAnalysis {
     available_from: string | null;
     available_to: string | null;
     change_percent: string | null;
+    trend: 'up' | 'down' | 'flat' | null;
+    daily_volatility_percent: string | null;
     updated_at: string | null;
   };
   intraday: Array<{ observed_at: string; value: string }>;
   sectors: ApiMarketIndex[];
   indices: ApiMarketIndex[];
   stocks: ApiMarketStock[];
+  top_volume: ApiMarketLeader[];
 }
 
 export type ApiMarketHistoryRange =

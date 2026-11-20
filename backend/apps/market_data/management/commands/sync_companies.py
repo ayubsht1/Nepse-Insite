@@ -12,13 +12,13 @@ class Command(BaseCommand):
         parser.add_argument(
             "--target",
             type=int,
-            default=10,
-            help="Ensure at least this many active company records exist (default: 10).",
+            default=None,
+            help="Optional maximum active-company target; default syncs the full directory.",
         )
 
     def handle(self, *args, **options):
         target = options["target"]
-        if target < 1:
+        if target is not None and target < 1:
             raise CommandError("--target must be a positive integer.")
         try:
             result = sync_company_directory(target=target)
@@ -29,6 +29,6 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 "Company directory sync complete: "
                 f"created={result['created']}, active={result['active']}, "
-                f"target={result['target']}"
+                f"target={result['target'] if result['target'] is not None else 'all'}"
             )
         )

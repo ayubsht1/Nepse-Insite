@@ -17,7 +17,13 @@ class StockPrice(models.Model):
     change_percent = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True
     )
+    previous_close = models.DecimalField(
+        max_digits=16, decimal_places=4, null=True, blank=True
+    )
     volume = models.PositiveBigIntegerField()
+    turnover = models.DecimalField(
+        max_digits=24, decimal_places=4, null=True, blank=True
+    )
     source = models.CharField(max_length=128, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -202,6 +208,9 @@ class MarketStockSnapshot(models.Model):
     change_amount = models.DecimalField(
         max_digits=16, decimal_places=4, null=True, blank=True
     )
+    previous_close = models.DecimalField(
+        max_digits=16, decimal_places=4, null=True, blank=True
+    )
     change_percent = models.DecimalField(
         max_digits=10, decimal_places=4, null=True, blank=True
     )
@@ -211,6 +220,7 @@ class MarketStockSnapshot(models.Model):
     volume = models.DecimalField(
         max_digits=24, decimal_places=4, null=True, blank=True
     )
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-turnover", "symbol"]

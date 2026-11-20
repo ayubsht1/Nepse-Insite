@@ -88,6 +88,7 @@ def collect_sharesansar_market_data():
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         market_html = _get_html(client, f"{SHARESANSAR_BASE}/market", SHARESANSAR_BASE)
         stocks_html = _get_html(
@@ -120,6 +121,7 @@ def collect_merolagani_market_data():
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         html = _get_html(
             client,
@@ -149,6 +151,7 @@ def collect_merolagani_floorsheet_data():
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         html = _get_html(client, MEROLAGANI_FLOORSHEET_URL, MEROLAGANI_BASE)
     rows = _parse_merolagani_floorsheet(html)
@@ -173,6 +176,7 @@ def collect_sharesansar_index_history():
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         robots = _robots_parser(client, SHARESANSAR_BASE)
         index_history_html = _get_html(
@@ -301,8 +305,8 @@ def collect_sharesansar_index_history():
     return {"source": SHARESANSAR, "records": len(parsed)}
 
 
-def collect_sharesansar_company_directory(limit=10):
-    if limit < 1:
+def collect_sharesansar_company_directory(limit=None):
+    if limit is not None and limit < 1:
         raise ValueError("Company directory limit must be positive.")
 
     headers = {
@@ -313,6 +317,7 @@ def collect_sharesansar_company_directory(limit=10):
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         robots = _robots_parser(client, SHARESANSAR_BASE)
         html = _get_html(
@@ -344,7 +349,11 @@ def collect_sharesansar_company_directory(limit=10):
                     COMPANY_DIRECTORY_COLUMNS,
                     draw=draw,
                     start=start,
-                    length=min(FLOORSHEET_PAGE_SIZE, limit - len(companies)),
+                    length=(
+                        FLOORSHEET_PAGE_SIZE
+                        if limit is None
+                        else min(FLOORSHEET_PAGE_SIZE, limit - len(companies))
+                    ),
                 )
                 params["sector"] = sector_id
                 response = client.get(
@@ -384,7 +393,7 @@ def collect_sharesansar_company_directory(limit=10):
                         continue
                     seen_symbols.add(company["symbol"])
                     companies.append(company)
-                    if len(companies) >= limit:
+                    if limit is not None and len(companies) >= limit:
                         return companies
                 page_count = len(payload["data"])
                 if not page_count:
@@ -416,6 +425,7 @@ def collect_sharesansar_company_history(company):
         timeout=REQUEST_TIMEOUT,
         headers=headers,
         follow_redirects=True,
+        transport=httpx.HTTPTransport(retries=2),
     ) as client:
         robots = _robots_parser(client, SHARESANSAR_BASE)
         html = _get_html(
@@ -653,6 +663,7 @@ def _parse_sharesansar_company_prices(rows):
                 "high": _number(row.get("high")),
                 "low": _number(row.get("low")),
                 "close": _number(row.get("close")),
+                "turnover": _number(row.get("traded_amount")),
                 "change_percent": _number(row.get("per_change")),
                 "volume": _number(row.get("traded_quantity")),
             }
@@ -862,6 +873,7 @@ def _sharesansar_stock_rows(html):
             if change_percent_index is not None and change_percent_index < len(values)
             else _number(record.get("diff"))
         )
+        close = _number(record.get("ltp"))
         stocks.append(
             {
                 "symbol": symbol,
@@ -869,8 +881,13 @@ def _sharesansar_stock_rows(html):
                 "open": _number(record.get("open")),
                 "high": _number(record.get("high")),
                 "low": _number(record.get("low")),
-                "close": _number(record.get("ltp")),
+                "close": close,
                 "change_amount": change_amount,
+                "previous_close": (
+                    close - change_amount
+                    if close is not None and change_amount is not None
+                    else None
+                ),
                 "change_percent": change_percent,
                 "turnover": _number(record.get("turnover")),
                 "volume": _number(record.get("vol")),

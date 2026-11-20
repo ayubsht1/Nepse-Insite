@@ -189,6 +189,7 @@ class MarketSourceParserTests(TestCase):
         self.assertEqual(parsed["indices"][1]["symbol"], "BANKING")
         self.assertEqual(parsed["stocks"][0]["change_percent"], Decimal("-2.0"))
         self.assertEqual(parsed["stocks"][0]["change_amount"], Decimal("-10"))
+        self.assertEqual(parsed["stocks"][0]["previous_close"], Decimal("505"))
         self.assertEqual(parsed["advancers"], 1)
         self.assertEqual(parsed["decliners"], 1)
 
@@ -410,6 +411,8 @@ class CompanyPricePersistenceTests(TestCase):
             "change_amount": Decimal("1"),
             "change_percent": Decimal("10"),
             "volume": Decimal("100"),
+            "previous_close": Decimal("10"),
+            "turnover": Decimal("1100"),
         }
 
     def test_price_upserts_are_idempotent_and_keep_highest_priority_source(self):
@@ -429,6 +432,8 @@ class CompanyPricePersistenceTests(TestCase):
         self.assertEqual(price.source, "nepsealpha")
         self.assertEqual(price.close_price, Decimal("11"))
         self.assertEqual(price.change_percent, Decimal("10"))
+        self.assertEqual(price.previous_close, Decimal("10"))
+        self.assertEqual(price.turnover, Decimal("1100"))
 
     def test_invalid_or_unmatched_quotes_do_not_create_company_prices(self):
         invalid = persist_company_prices(
@@ -501,12 +506,38 @@ class CompanyDirectorySyncTests(TestCase):
 
         result = sync_company_directory(target=3)
 
-        self.assertEqual(result, {"created": 2, "active": 3, "target": 3})
+        self.assertEqual(
+            result,
+            {"created": 2, "updated": 1, "active": 3, "target": 3},
+        )
         self.assertEqual(StockPrice.objects.count(), 0)
         self.assertEqual(
             Company.objects.get(symbol="XYZ").sector,
             "Hydropower",
         )
+
+    @patch("apps.companies.market_directory.collect_sharesansar_company_directory")
+    def test_full_directory_sync_reactivates_existing_listed_companies(self, collect_mock):
+        company = Company.objects.create(
+            symbol="ABC",
+            name="Old Name Limited",
+            sector="Old Sector",
+            is_active=False,
+        )
+        collect_mock.return_value = [
+            {"symbol": "ABC", "name": "ABC Limited", "sector": "Banking"},
+            {"symbol": "XYZ", "name": "XYZ Limited", "sector": "Hydropower"},
+        ]
+
+        result = sync_company_directory()
+
+        company.refresh_from_db()
+        collect_mock.assert_called_once_with(limit=None)
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["updated"], 1)
+        self.assertTrue(company.is_active)
+        self.assertEqual(company.name, "ABC Limited")
+        self.assertEqual(company.sector, "Banking")
 
 
 class MarketOverviewApiTests(APITestCase):
@@ -544,6 +575,7 @@ class MarketOverviewApiTests(APITestCase):
             symbol="ABC",
             close_price=Decimal("500"),
             turnover=Decimal("1000"),
+            volume=Decimal("300"),
         )
         MarketStockSnapshot.objects.create(
             source="nepsealpha",
@@ -566,6 +598,52 @@ class MarketOverviewApiTests(APITestCase):
         self.assertEqual(response.data["sectors"][0]["symbol"], "BANKING")
         self.assertEqual(response.data["indices"][0]["symbol"], "BANKING")
         self.assertEqual(response.data["stocks"][0]["source"], "sharesansar")
+        self.assertEqual(response.data["top_volume"][0]["symbol"], "ABC")
+
+    def test_analysis_range_filters_snapshot_and_latest_quotes(self):
+        old_date = timezone.localdate() - timedelta(days=5)
+        MarketSnapshot.objects.create(
+            source="sharesansar",
+            date=old_date,
+            as_of=timezone.now() - timedelta(days=5),
+            index_value=Decimal("2600"),
+        )
+        MarketStockSnapshot.objects.create(
+            source="sharesansar",
+            date=old_date,
+            symbol="OLD",
+            close_price=Decimal("100"),
+        )
+
+        response = self.client.get(
+            f"/api/market-data/analysis/?range=all&to={old_date.isoformat()}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["snapshot"]["date"], old_date.isoformat())
+        self.assertEqual(
+            {stock["symbol"] for stock in response.data["stocks"]},
+            {"OLD"},
+        )
+
+    def test_market_history_metrics_require_enough_real_daily_values(self):
+        today = timezone.localdate()
+        for offset, value in ((2, "2680"), (1, "2690"), (0, "2700")):
+            MarketIndexSnapshot.objects.create(
+                source="nepsealpha",
+                date=today - timedelta(days=offset),
+                symbol="NEPSE",
+                name="NEPSE Index",
+                close_value=Decimal(value),
+            )
+
+        response = self.client.get("/api/market-data/analysis/?range=7d")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["history_period"]["trend"], "up")
+        self.assertIsNotNone(
+            response.data["history_period"]["daily_volatility_percent"]
+        )
 
     def test_analysis_endpoint_returns_quotes_without_an_index_snapshot(self):
         self.snapshot.delete()

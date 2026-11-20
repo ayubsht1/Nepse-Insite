@@ -70,9 +70,11 @@ class MarketStockSnapshotSerializer(serializers.ModelSerializer):
             "low_price",
             "close_price",
             "change_amount",
+            "previous_close",
             "change_percent",
             "turnover",
             "volume",
+            "updated_at",
         ]
 
 
@@ -92,7 +94,9 @@ class StockPriceSerializer(serializers.ModelSerializer):
             "close_price",
             "change_amount",
             "change_percent",
+            "previous_close",
             "volume",
+            "turnover",
             "source",
             "updated_at",
         ]
@@ -153,7 +157,21 @@ class PriceImportRowSerializer(serializers.Serializer):
     change_percent = serializers.DecimalField(
         max_digits=10, decimal_places=4, required=False, allow_null=True
     )
+    previous_close = serializers.DecimalField(
+        max_digits=16,
+        decimal_places=4,
+        min_value=Decimal("0.0001"),
+        required=False,
+        allow_null=True,
+    )
     volume = serializers.IntegerField(min_value=0)
+    turnover = serializers.DecimalField(
+        max_digits=24,
+        decimal_places=4,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
 
     def validate(self, attrs):
         low, high = attrs["low_price"], attrs["high_price"]
