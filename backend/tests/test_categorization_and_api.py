@@ -1,10 +1,13 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.test import APIClient
 
+from apps.crawlers.github_actions import WorkflowDispatchError
+from apps.crawlers.models import CrawlRun, CrawlSource
 from apps.news.models import NewsArticle, NewsCompanyTag
 from apps.users.models import UserProfile
 from .factories import create_company, create_user
@@ -85,6 +88,55 @@ class CategorizationAndApiTests(TestCase):
         self.assertEqual(self.client.get("/api/admin/crawl-runs/").status_code, 403)
         self.client.force_authenticate(self.admin)
         self.assertEqual(self.client.get("/api/admin/crawl-runs/").status_code, 200)
+
+    @patch("apps.crawlers.views.dispatch_crawl_workflow")
+    def test_admin_crawl_dispatches_workflow_instead_of_queueing_task(self, dispatch):
+        source = CrawlSource.objects.create(
+            name="Admin dispatch source",
+            key="admin-dispatch",
+            base_url="https://admin-dispatch.example.test",
+            listing_url="https://admin-dispatch.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            "/api/admin/crawl-runs/",
+            {"source_ids": [source.pk]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        run = CrawlRun.objects.get(source=source)
+        self.assertEqual(run.status, CrawlRun.Status.QUEUED)
+        dispatch.assert_called_once_with([run.pk])
+
+    @patch(
+        "apps.crawlers.views.dispatch_crawl_workflow",
+        side_effect=WorkflowDispatchError("GitHub Actions is not configured."),
+    )
+    def test_admin_crawl_marks_runs_failed_when_dispatch_fails(self, _dispatch):
+        source = CrawlSource.objects.create(
+            name="Failed dispatch source",
+            key="failed-dispatch",
+            base_url="https://failed-dispatch.example.test",
+            listing_url="https://failed-dispatch.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            "/api/admin/crawl-runs/",
+            {"source_ids": [source.pk]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        run = CrawlRun.objects.get(source=source)
+        self.assertEqual(run.status, CrawlRun.Status.FAILED)
+        self.assertIn("GitHub Actions is not configured", run.error_message)
 
     def test_viewer_cannot_import_prices_and_admin_can(self):
         body = {

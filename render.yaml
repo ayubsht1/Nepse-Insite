@@ -30,70 +30,11 @@ services:
         sync: false
       - key: CRAWLER_USER_AGENT
         sync: false
-
-  - type: worker
-    name: nepse-insight-celery-worker
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    dockerCommand: celery -A config worker --loglevel=info --concurrency=1
-    numInstances: 1
-    maxShutdownDelaySeconds: 300
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: config.settings.production
-      - key: DEBUG
-        value: "False"
-      - key: SECRET_KEY
+      - key: GITHUB_ACTIONS_TOKEN
         sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: CELERY_BROKER_URL
-        sync: false
-      - key: CELERY_RESULT_BACKEND
-        sync: false
-      - key: ALLOWED_HOSTS
-        sync: false
-      - key: PUBLIC_APP_URL
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
-      - key: CSRF_TRUSTED_ORIGINS
-        sync: false
-      - key: CRAWLER_USER_AGENT
-        sync: false
-
-  - type: worker
-    name: nepse-insight-celery-beat
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
-    dockerCommand: celery -A config beat --loglevel=info --schedule=/var/lib/celerybeat/celerybeat-schedule
-    numInstances: 1
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: config.settings.production
-      - key: DEBUG
-        value: "False"
-      - key: SECRET_KEY
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: CELERY_BROKER_URL
-        sync: false
-      - key: CELERY_RESULT_BACKEND
-        sync: false
-      - key: ALLOWED_HOSTS
-        sync: false
-      - key: PUBLIC_APP_URL
-        sync: false
-      - key: CORS_ALLOWED_ORIGINS
-        sync: false
-      - key: CSRF_TRUSTED_ORIGINS
-        sync: false
-      - key: CRAWLER_USER_AGENT
-        sync: false
+      - key: GITHUB_REPOSITORY
+        value: ayubsht1/Nepse-Insite
+      - key: GITHUB_WORKFLOW_FILE
+        value: data-jobs.yml
+      - key: GITHUB_ACTIONS_REF
+        value: main

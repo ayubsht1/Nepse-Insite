@@ -11,8 +11,9 @@ created with `python manage.py seed` and is explicitly labeled as fabricated.
   Query.
 - **Backend:** Django 6, Django REST Framework, SimpleJWT, drf-spectacular.
 - **Data:** PostgreSQL (or Supabase PostgreSQL); Redis for Celery and Channels.
-- **Background work:** Celery worker + Beat; NEPSE Alpha, ShareSansar, and
-  Merolagani market-data collection plus four-source news crawling.
+- **Background work:** GitHub Actions runs scheduled/manual collection
+  commands directly against PostgreSQL. Celery remains available for local
+  Compose and explicitly bounded legacy-queue processing.
 - **Real time:** authenticated Django Channels updates over ASGI/WebSockets.
 - **Analysis:** Decimal-based calculations over stored OHLCV and floorsheet
   records; unavailable inputs are returned as unavailable.
@@ -100,81 +101,107 @@ For native development outside Compose, see
 [backend/README.md](./backend/README.md). Local Next.js API URLs remain
 relative; use the Compose Nginx entry point when testing the integrated app.
 
-## Render deployment
+## Render and GitHub Actions deployment
 
-The root [render.yaml](./render.yaml) defines three Docker services:
+The root [render.yaml](./render.yaml) defines only the Docker Web Service.
+It runs Nginx, Next.js, and Daphne in the existing container; it does not run
+Celery workers or Beat. This keeps the 512 MiB Render Web Service within its
+memory budget. Do not add a persistent Render Worker or Beat service on the
+free plan.
 
-- The **Web Service** builds from the root `Dockerfile` and runs Nginx, Next.js,
-  and Daphne. Render supplies `PORT`; Celery is not started in this 512 MiB
-  service.
-- One **Background Worker** builds from `backend/Dockerfile` and runs
-  `celery -A config worker --loglevel=info --concurrency=1`.
-- One **Background Worker** builds from `backend/Dockerfile` and runs
-  `celery -A config beat --loglevel=info --schedule=/var/lib/celerybeat/celerybeat-schedule`.
-  The Blueprint pins it to one instance; do not run another Beat service.
+The [data-jobs.yml](./.github/workflows/data-jobs.yml) workflow runs Django
+management commands directly against PostgreSQL. Scheduled market, directory,
+history, and news collection does not publish to Redis. Existing Celery task
+implementations are reused synchronously; Celery Beat remains available for
+local Compose compatibility but must not run in production alongside GitHub
+Actions. Analytics endpoints calculate from stored records on request, so new
+market data is reflected without a separate analytics refresh job or cache.
 
-The worker and Beat use the existing Django task definitions and schedules.
-The worker's 300-second shutdown allowance lets a running crawl finish during
-planned shutdowns where possible. Neither service creates or changes a database
-or Redis instance.
+### Configure Render
 
-The Blueprint uses `sync: false` for credentials and deployment-specific values;
-it contains no secret values. For each service, provide the same existing
-production values:
+Connect the repository to Render as a Blueprint and sync `render.yaml`. Before
+syncing, make the Web Service `name` match the existing service if it should be
+updated rather than duplicated. Keep the existing production values for
+`SECRET_KEY`, `DATABASE_URL`, Redis URLs, host/origin settings, and
+`CRAWLER_USER_AGENT`; do not change the existing database or Redis credentials.
+
+Configure these additional Web Service values:
+
+- `GITHUB_ACTIONS_TOKEN`: a fine-grained GitHub token scoped to this repository
+  with **Actions: read and write** permission. The token is only used when an
+  administrator starts a crawl from the app.
+- `GITHUB_REPOSITORY`, `GITHUB_WORKFLOW_FILE`, and `GITHUB_ACTIONS_REF` are
+  set in the Blueprint to the repository, workflow filename, and default
+  branch. Update them if the repository or default branch changes.
+
+The admin crawl endpoint creates `CrawlRun` rows and dispatches
+`workflow_dispatch`; it no longer puts work on a Redis queue with no worker.
+If dispatch fails, the runs are marked failed with an explanatory error.
+
+### Configure GitHub Actions
+
+Add these repository **Actions secrets** using the same production credentials
+as Render:
 
 - `SECRET_KEY`
-- `DATABASE_URL` (the existing Supabase PostgreSQL URL with `sslmode=require`)
-- `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` (the existing
-  Redis-compatible service URLs)
-- `ALLOWED_HOSTS`, `PUBLIC_APP_URL`, `CORS_ALLOWED_ORIGINS`, and
-  `CSRF_TRUSTED_ORIGINS`
-- `CRAWLER_USER_AGENT`
+- `DATABASE_URL` (Supabase PostgreSQL URL, including `sslmode=require`)
+- `CRAWLER_USER_AGENT` (a real contact string, required before enabling sources)
 
-`DJANGO_SETTINGS_MODULE=config.settings.production` and `DEBUG=False` are set
-by the Blueprint. Keep the existing Redis logical databases and connection
-values unchanged. Render supplies `PORT` to the Web Service; do not set it on
-the worker or Beat services.
+The workflow uses a GitHub Actions-specific Django settings module that requires
+external TLS-enabled PostgreSQL and uses an in-memory Channels layer. Normal
+collection jobs do not need Redis and do not connect to it. The Supabase
+database must accept connections from GitHub-hosted runners; no live database
+connection has been tested here.
 
-To deploy, connect the repository to Render as a Blueprint and sync
-`render.yaml`. Before the first sync, change the Web Service `name` in the
-Blueprint to exactly match the existing Render Web Service name so it updates
-that service instead of creating a duplicate. Supply the same existing
-environment values when prompted. If these services are added to an already
-created Blueprint, Render does not prompt again for `sync: false` values; copy
-the values from the existing Web Service into each new Background Worker in
-the Render Dashboard before deploying.
+To run a job manually, open **Actions → NEPSE data jobs → Run workflow** and
+choose `market-data`, `company-history`, `index-history`, `company-directory`,
+or `news`. For news, optionally enter comma-separated enabled source keys such
+as `sharesansar`; blank selects enabled sources. The Django admin crawl button
+uses the same workflow automatically.
 
-After sync, verify that exactly one Beat instance exists across the workspace.
-Remove or scale to zero any older Beat service. The Web Service image runs
-migrations and collects static files before starting its Supervisor-managed
-Nginx, Daphne, and Next.js processes. Django reads service configuration from
-the process environment; only native development loads `backend/.env`.
-`STATIC_ROOT` and `MEDIA_ROOT` default to `/srv/static` and `/srv/media`. The
-container filesystem is ephemeral: use external object storage or configure
-persistent storage if uploads must survive deployments.
+The optional `run_legacy_queue_worker` input is only for explicitly processing
+old Celery messages. It requires a `CELERY_BROKER_URL` Actions secret reachable
+from GitHub-hosted runners. It starts one prefork worker on the app's default
+`celery` queue, concurrency one, with task-count, idle, per-task, and total-run
+limits. Only use it if that broker and queue are dedicated to this app; normal
+scheduled/manual collection never starts this worker.
 
-### Render verification
+### Scheduling and free-tier limits
 
-- **Web Service:** confirm Daphne, Next.js, and Nginx start; Celery worker and
-  Beat startup lines should not appear here.
-- **Celery Worker:** confirm it connects to the configured broker, reports
-  `concurrency: 1`, reaches `ready`, and lists the crawler and market-data
-  tasks as registered.
-- **Celery Beat:** confirm it starts with the persistent scheduler and its
-  configured schedule file. At scheduled times, expect `Sending due task`
-  entries for the configured schedule names.
-- **Crawler execution:** after Beat dispatches
-  `apps.crawlers.tasks.crawl_enabled_sources`, confirm the worker receives that
-  task and then receives `apps.crawlers.tasks.crawl_source` for each enabled
-  source. A successful crawl logs `Completed crawl run`; inspect the matching
-  `CrawlRun` record for `SUCCEEDED`. Disabled sources are not crawled.
-- **Single scheduler:** confirm exactly one Beat service instance is running;
-  remove any older standalone Beat service.
+The workflow converts the existing Kathmandu schedule to UTC: market collection
+every 15 minutes during the configured Sunday–Thursday market window, news
+every four hours, company-directory sync at 15:05 NPT, index history at 15:15,
+and company history at 15:45. GitHub cron is best-effort and may be delayed or
+skipped; collection tasks also retain their market-hours and trading-day
+guards.
 
-If verification fails, share the timestamped Web Service, Worker, and Beat log
-sections covering startup and the failed task, plus the associated crawl-run
-status and error message. Redact database/Redis URLs, passwords, Django
-`SECRET_KEY`, and other credentials.
+This schedule creates roughly 600 workflow runs per month before manual
+triggers. Dependency caching reduces repeated setup, but actual included-minute
+use depends on collection duration, repository visibility, and the GitHub plan.
+Monitor **Settings → Billing and licensing → Actions**. If the repository's
+included quota or average job duration is lower than required, reduce the cron
+frequency before enabling sources; GitHub Actions cannot guarantee execution
+timing or a particular monthly free-minute allowance.
+
+### Verify after deployment
+
+- **Render Web Service:** confirm Daphne, Next.js, and Nginx start. Celery
+  Worker and Beat startup lines should not appear.
+- **GitHub Actions:** confirm a scheduled or manual run starts and the
+  `run_collection` step reports task results without a Redis/broker connection.
+- **Crawlers:** check that selected sources are enabled, a `CrawlRun` moves
+  through `queued` and `running` to `succeeded` (or `partial` when robots rules
+  disallow access), and the logs report extracted/created/duplicate counts.
+- **Market data:** confirm fresh rows and timestamps in the existing market
+  tables and that the analysis API reflects them.
+- **Database:** verify the expected rows in Supabase; a successful Actions
+  command alone is not proof of durable production data or successful scraping.
+
+No Render deployment, GitHub Actions run, Supabase write, or live scrape has
+been verified. If verification fails, share the failing Actions step and
+timestamped traceback, the corresponding Render Web Service log if dispatch
+failed, and the affected `CrawlRun` status/error. Redact all credentials,
+tokens, database/Redis URLs, and secret values.
 
 Dashboard pages require authentication. Public registration is at `/register`
 and always grants Viewer. Protected routes are `/dashboard`, `/analyst`, and
@@ -193,6 +220,8 @@ and always grants Viewer. Protected routes are `/dashboard`, `/analyst`, and
 | `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_HSTS_SECONDS`, `DJANGO_HSTS_INCLUDE_SUBDOMAINS`, `DJANGO_HSTS_PRELOAD` | Production HTTPS redirect and HSTS policy; enable subdomain/preload policies only when appropriate for the domain. |
 | `CRAWLER_USER_AGENT` | Crawler contact string; provide a real contact before enabling any publisher. |
 | `PORT` | Host/platform port mapped to Nginx container port 80; backend and Redis are not published. |
+| `GITHUB_ACTIONS_TOKEN` | Render Web Service token with repository-scoped Actions read/write permission for admin-triggered crawls. |
+| `GITHUB_REPOSITORY`, `GITHUB_WORKFLOW_FILE`, `GITHUB_ACTIONS_REF` | GitHub repository, workflow file, and default branch used for dispatching manual crawls. |
 
 Compose constructs `REDIS_URL`, `CELERY_BROKER_URL`, and
 `CELERY_RESULT_BACKEND` from the internal Redis service and password. Do not
@@ -248,23 +277,24 @@ volume.
 The Market Analysis overview collects public NEPSE Alpha JSON from `/live/stocks`
 and `/trading-ta`, ShareSansar's `/market` and `/today-share-price` pages, and
 Merolagani's `/LatestMarket.aspx` page. These are website endpoints/pages, not
-documented or guaranteed APIs. Celery Beat polls every 15 minutes during the
-Sunday–Thursday 11:00–15:00 Nepal-time session. Complete company OHLCV rows are
-matched to active companies by symbol and upserted by company/date; NEPSE Alpha
-is preferred over ShareSansar and Merolagani when their same-day prices differ.
-Incomplete or unmatched rows are skipped and logged. After market close, Beat
-imports ShareSansar's public Index History DataTables rows and the historical
-price/floorsheet rows exposed on each active company's public profile. The
-history collectors paginate the provider's 50-row tables, preserve provider
-dates and values, and upsert into `MarketIndexSnapshot`, `StockPrice`, and
-`FloorsheetTransaction`. Later runs refresh recent company history and daily
-floorsheet records. Merolagani's paginated floorsheet page remains an independent
-source; it currently exposes up to 500 rows per page, so VWAP/broker analysis may
-cover only stored rows. Merolagani's inspected market page did not expose a
-populated index table, so its index, sector, and market-total values remain
-unavailable. NEPSE Alpha's CSV export is browser-accessible but blocks direct
-backend requests in the current environment, so the collector does not bypass
-that restriction. Bizmandu remains a news source: no structured quote feed was
+documented or guaranteed APIs. On Render, GitHub Actions runs the synchronous
+`market-data` operation every 15 minutes during the Sunday–Thursday
+11:00–15:00 Nepal-time session; local Compose retains Celery Beat. Complete
+company OHLCV rows are matched to active companies by symbol and upserted by
+company/date; NEPSE Alpha is preferred over ShareSansar and Merolagani when
+their same-day prices differ. Incomplete or unmatched rows are skipped and
+logged. After market close, GitHub Actions runs the index-history,
+company-directory, and company-history operations. The history collectors
+paginate the provider's 50-row tables, preserve provider dates and values, and
+upsert into `MarketIndexSnapshot`, `StockPrice`, and `FloorsheetTransaction`.
+Later runs refresh recent company history and daily floorsheet records.
+Merolagani's paginated floorsheet page remains an independent source; it
+currently exposes up to 500 rows per page, so VWAP/broker analysis may cover
+only stored rows. Merolagani's inspected market page did not expose a populated
+index table, so its index, sector, and market-total values remain unavailable.
+NEPSE Alpha's CSV export is browser-accessible but blocks direct backend
+requests in the current environment, so the collector does not bypass that
+restriction. Bizmandu remains a news source: no structured quote feed was
 confirmed. Missing data is displayed as unavailable, never backfilled with
 estimates. ShareSansar pages are public but are not documented APIs; review its
 current terms and robots directives before deploying collection beyond local

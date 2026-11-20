@@ -11,7 +11,7 @@ does not ship fabricated prices, floorsheets, articles, or analysis.
   market snapshots, plus OHLCV and transaction-level floorsheet storage/import.
 - `apps/news`: articles, deterministic company tagging, corrections/history.
 - `apps/crawlers`: source configuration, HTTPX/BeautifulSoup crawler, Celery
-  jobs and crawl-run records.
+  jobs, synchronous collection commands, and crawl-run records.
 - `apps/analytics`: VWAP, estimated close-location pressure, volume anomaly,
   broker, and news/price comparison services.
 - `config`: Django settings, Celery, Channels consumer and JWT WebSocket auth.
@@ -115,8 +115,9 @@ commands.
 The `sync_companies` command adds real company names, symbols, and sectors from
 ShareSansar's public company list until the active directory reaches the target
 (10 by default). It does not create prices or floorsheet transactions. Run it
-manually with `python manage.py sync_companies --target 10`; Celery Beat also
-checks the target after market close. This public page is not a documented API;
+manually with `python manage.py sync_companies --target 10`; local Compose Beat
+checks the target after market close, while Render uses the GitHub Actions
+`company-directory` operation. This public page is not a documented API;
 review its terms and robots directives before production use.
 
 ## Environment and deployment
@@ -241,9 +242,13 @@ Runs fail explicitly when no URLs match or no headline can be extracted;
 permanent 4xx errors are not retried (429 and server/network errors may retry).
 New articles are classified and emitted as Channels events.
 
-Celery Beat schedules enabled sources every four hours. Redis connectivity and
-task autodiscovery were verified locally; no real source crawl was run and no
-live article persistence is claimed. Import genuine OHLCV and floorsheet data
+On Render, GitHub Actions invokes
+`python manage.py run_collection news`; the command executes crawler tasks
+synchronously and does not enqueue through Redis. The admin crawl endpoint
+dispatches that workflow and the command updates its `CrawlRun` records.
+Local Compose retains the existing Celery Beat schedule for enabled sources.
+Redis connectivity and task autodiscovery were verified locally; no real source
+crawl was run and no live article persistence is claimed. Import genuine OHLCV and floorsheet data
 only from verified, licensed providers. The seed command's demo records are
 fictional and separately marked. The frontend and APIs report unavailable
 genuine data rather than making it up.
@@ -261,8 +266,9 @@ endpoints and HTML pages are public website resources, not documented or
 guaranteed APIs; terms and response formats may change. Collection checks each
 HTML provider's `robots.txt` before requesting its market pages.
 
-Celery Beat schedules collection every 15 minutes Sunday–Thursday from 11:00
-through 15:00 Asia/Kathmandu. Tasks avoid requests outside that window and the
+The GitHub Actions `market-data` operation runs every 15 minutes Sunday–Thursday
+from 11:00 through 15:00 Asia/Kathmandu on Render; local Compose retains the
+Celery Beat schedule. Tasks avoid requests outside that window and the
 ShareSansar/Merolagani tasks also stop for the day after NEPSE Alpha reports the
 market closed. Merolagani floorsheet rows are collected on the same schedule
 and deduplicated by transaction ID. Its public page currently exposes a
