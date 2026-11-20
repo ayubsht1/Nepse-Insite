@@ -2,14 +2,28 @@ import re
 from unittest.mock import patch
 
 import httpx
+from django.conf import settings
 from django.test import TestCase
 
+from config.celery import app as celery_app
 from apps.crawlers.models import CrawlRun, CrawlSource
 from apps.crawlers.services import NoArticlesDiscovered
 from apps.crawlers.tasks import crawl_enabled_sources, crawl_source
 
 
 class CrawlerTaskTests(TestCase):
+    def test_beat_schedule_references_registered_tasks(self):
+        celery_app.loader.import_default_modules()
+        scheduled_tasks = {
+            entry["task"]
+            for entry in settings.CELERY_BEAT_SCHEDULE.values()
+        }
+        registered_tasks = set(celery_app.tasks)
+
+        self.assertIn("apps.crawlers.tasks.crawl_enabled_sources", scheduled_tasks)
+        self.assertIn(crawl_source.name, registered_tasks)
+        self.assertFalse(scheduled_tasks - registered_tasks)
+
     def test_observed_news_source_patterns_are_configured_but_disabled(self):
         examples = {
             "merolagani": (

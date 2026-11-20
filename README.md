@@ -100,59 +100,81 @@ For native development outside Compose, see
 [backend/README.md](./backend/README.md). Local Next.js API URLs remain
 relative; use the Compose Nginx entry point when testing the integrated app.
 
-## Render Docker deployment
+## Render deployment
 
-The root `Dockerfile` builds the Next.js production bundle and Django
-dependencies, then runs Nginx, Next.js, and Daphne in one Render Web Service.
-Nginx listens on Render's `PORT` (default `10000`) and proxies to the
-localhost-only application processes. Django migrations and `collectstatic`
-run before Supervisor starts Nginx, Daphne, and Next.js. Nginx binds Render's
-public `PORT` immediately; Next.js and Daphne bind to localhost. Celery workers
-and Beat are deliberately not started in the Web Service. Nginx answers
-`HEAD /` directly for Render's health check; `GET /` remains proxied to Next.js.
+The root [render.yaml](./render.yaml) defines three Docker services:
 
-In Render, create a **Web Service** from this repository, select **Docker**,
-and leave the Dockerfile path at `./Dockerfile`. Add these environment variables
-to the Web Service's Environment settings without committing their values;
-Render does not need or use an uploaded `.env` file:
+- The **Web Service** builds from the root `Dockerfile` and runs Nginx, Next.js,
+  and Daphne. Render supplies `PORT`; Celery is not started in this 512 MiB
+  service.
+- One **Background Worker** builds from `backend/Dockerfile` and runs
+  `celery -A config worker --loglevel=info --concurrency=1`.
+- One **Background Worker** builds from `backend/Dockerfile` and runs
+  `celery -A config beat --loglevel=info --schedule=/var/lib/celerybeat/celerybeat-schedule`.
+  The Blueprint pins it to one instance; do not run another Beat service.
 
-- `SECRET_KEY`: unique Django key of at least 50 characters.
-- `DATABASE_URL`: Supabase PostgreSQL connection URL with `sslmode=require`.
-- `REDIS_URL`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`: URLs from an
-  external Redis-compatible service, using separate logical databases if
-  supported.
-- `ALLOWED_HOSTS`: the Render hostname (and any custom domain), comma-separated.
-- `PUBLIC_APP_URL`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`: the public
-  HTTPS origin, for example `https://your-service.onrender.com`.
-- `CRAWLER_USER_AGENT`: a crawler identifier with a real contact address.
-- Optionally set `SECURE_SSL_REDIRECT=True`, `DEBUG=False`,
-  `SECURE_HSTS_SECONDS`,
-  `SECURE_HSTS_INCLUDE_SUBDOMAINS`, `SECURE_HSTS_PRELOAD`, and `LOG_LEVEL`.
+The worker and Beat use the existing Django task definitions and schedules.
+The worker's 300-second shutdown allowance lets a running crawl finish during
+planned shutdowns where possible. Neither service creates or changes a database
+or Redis instance.
 
-Render supplies `PORT`; do not override it unless required by the service.
-The Web Service image selects `config.settings.production`; set that value as
-`DJANGO_SETTINGS_MODULE` on each Background Worker because its backend image
-defaults to development settings. Django reads service configuration directly
-from the process environment; only native development loads `backend/.env`.
-`STATIC_ROOT` and `MEDIA_ROOT` default to `/srv/static` and `/srv/media`.
-Static files are collected at startup. The container filesystem is ephemeral:
-if the application stores uploads locally, attach a persistent Render Disk at a
-path and set `MEDIA_ROOT` to that mount path. Otherwise configure external
-object storage for uploads.
+The Blueprint uses `sync: false` for credentials and deployment-specific values;
+it contains no secret values. For each service, provide the same existing
+production values:
 
-Create one Render **Background Worker** service from the `backend/` directory
-using `backend/Dockerfile`. Give it the same Django, Supabase, and Redis
-environment values as the Web Service, including
-`DJANGO_SETTINGS_MODULE=config.settings.production`; set its Docker Command to
-`celery -A config worker --loglevel=info --concurrency=1`.
+- `SECRET_KEY`
+- `DATABASE_URL` (the existing Supabase PostgreSQL URL with `sslmode=require`)
+- `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` (the existing
+  Redis-compatible service URLs)
+- `ALLOWED_HOSTS`, `PUBLIC_APP_URL`, `CORS_ALLOWED_ORIGINS`, and
+  `CSRF_TRUSTED_ORIGINS`
+- `CRAWLER_USER_AGENT`
 
-Create one additional Background Worker service for Beat using the same image
-and environment values, with Docker Command
-`celery -A config beat --loglevel=info --schedule=/var/lib/celerybeat/celerybeat-schedule`.
-Do not run multiple Beat instances. These services keep scheduled market-data
-collection and crawling outside the 512 MiB Web Service while preserving the
-existing Celery tasks and schedules. There is no `render.yaml`; configure
-these two Background Worker services in Render with the commands above.
+`DJANGO_SETTINGS_MODULE=config.settings.production` and `DEBUG=False` are set
+by the Blueprint. Keep the existing Redis logical databases and connection
+values unchanged. Render supplies `PORT` to the Web Service; do not set it on
+the worker or Beat services.
+
+To deploy, connect the repository to Render as a Blueprint and sync
+`render.yaml`. Before the first sync, change the Web Service `name` in the
+Blueprint to exactly match the existing Render Web Service name so it updates
+that service instead of creating a duplicate. Supply the same existing
+environment values when prompted. If these services are added to an already
+created Blueprint, Render does not prompt again for `sync: false` values; copy
+the values from the existing Web Service into each new Background Worker in
+the Render Dashboard before deploying.
+
+After sync, verify that exactly one Beat instance exists across the workspace.
+Remove or scale to zero any older Beat service. The Web Service image runs
+migrations and collects static files before starting its Supervisor-managed
+Nginx, Daphne, and Next.js processes. Django reads service configuration from
+the process environment; only native development loads `backend/.env`.
+`STATIC_ROOT` and `MEDIA_ROOT` default to `/srv/static` and `/srv/media`. The
+container filesystem is ephemeral: use external object storage or configure
+persistent storage if uploads must survive deployments.
+
+### Render verification
+
+- **Web Service:** confirm Daphne, Next.js, and Nginx start; Celery worker and
+  Beat startup lines should not appear here.
+- **Celery Worker:** confirm it connects to the configured broker, reports
+  `concurrency: 1`, reaches `ready`, and lists the crawler and market-data
+  tasks as registered.
+- **Celery Beat:** confirm it starts with the persistent scheduler and its
+  configured schedule file. At scheduled times, expect `Sending due task`
+  entries for the configured schedule names.
+- **Crawler execution:** after Beat dispatches
+  `apps.crawlers.tasks.crawl_enabled_sources`, confirm the worker receives that
+  task and then receives `apps.crawlers.tasks.crawl_source` for each enabled
+  source. A successful crawl logs `Completed crawl run`; inspect the matching
+  `CrawlRun` record for `SUCCEEDED`. Disabled sources are not crawled.
+- **Single scheduler:** confirm exactly one Beat service instance is running;
+  remove any older standalone Beat service.
+
+If verification fails, share the timestamped Web Service, Worker, and Beat log
+sections covering startup and the failed task, plus the associated crawl-run
+status and error message. Redact database/Redis URLs, passwords, Django
+`SECRET_KEY`, and other credentials.
 
 Dashboard pages require authentication. Public registration is at `/register`
 and always grants Viewer. Protected routes are `/dashboard`, `/analyst`, and
