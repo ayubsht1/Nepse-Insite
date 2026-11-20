@@ -57,6 +57,7 @@ RUN apt-get update \
        /var/lib/nginx \
        /tmp/nginx_client_temp \
        /tmp/nginx_proxy_temp \
+    && touch /tmp/nginx-access.log /tmp/nginx-error.log \
     && chown -R app:app \
        /srv/static \
        /srv/media \
@@ -64,7 +65,9 @@ RUN apt-get update \
        /var/cache/nginx \
        /var/lib/nginx \
        /tmp/nginx_client_temp \
-       /tmp/nginx_proxy_temp
+       /tmp/nginx_proxy_temp \
+       /tmp/nginx-access.log \
+       /tmp/nginx-error.log
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
 
@@ -75,9 +78,6 @@ COPY --chown=app:app frontend/public/ /app/frontend/public/
 COPY --from=frontend-build --chown=app:app /src/frontend/.next /app/frontend/.next
 COPY --from=frontend-production-dependencies --chown=app:app /src/frontend/node_modules /app/frontend/node_modules
 
-# Copy Next.js configuration when present.
-# If your project uses next.config.mjs, next.config.js, or next.config.ts,
-# add the matching COPY instruction here.
 
 COPY --chown=app:app backend/ /app/backend/
 
