@@ -97,6 +97,45 @@ def _daily_nepse_history(end_date):
     return points
 
 
+def _market_history_metrics(points):
+    returns = [
+        (current["value"] - previous["value"])
+        / previous["value"]
+        * Decimal("100")
+        for previous, current in zip(points, points[1:])
+        if previous["value"]
+    ]
+    volatility = None
+    if len(returns) >= 2:
+        mean = sum(returns, Decimal("0")) / len(returns)
+        variance = sum(
+            ((value - mean) ** 2 for value in returns),
+            Decimal("0"),
+        ) / len(returns)
+        volatility = variance.sqrt().quantize(Decimal("0.0001"))
+    change = None
+    if len(points) >= 2 and points[0]["value"]:
+        change = (
+            (points[-1]["value"] - points[0]["value"])
+            / points[0]["value"]
+            * Decimal("100")
+        )
+    return {
+        "trend": (
+            "up"
+            if change is not None and change > 0
+            else "down"
+            if change is not None and change < 0
+            else "flat"
+            if change is not None
+            else None
+        ),
+        "daily_volatility_percent": (
+            str(volatility) if volatility is not None else None
+        ),
+    }
+
+
 class StockPriceListView(generics.ListAPIView):
     serializer_class = StockPriceSerializer
     permission_classes = [IsAuthenticated]
@@ -123,22 +162,50 @@ class MarketAnalysisOverviewView(APIView):
 
     def get(self, request):
         start_date, end_date = parse_date_range(request)
-        stock_dates = MarketStockSnapshot.objects.filter(
-            source__in=["nepsealpha", "sharesansar", "merolagani"]
-        ).values("source").annotate(latest_date=Max("date"))
+        stock_dates = (
+            MarketStockSnapshot.objects.filter(
+                source__in=["nepsealpha", "sharesansar", "merolagani"],
+                date__lte=end_date,
+            )
+            .values("source")
+            .annotate(latest_date=Max("date"))
+        )
         stock_filter = Q(pk__in=[])
         for stock_date in stock_dates:
             stock_filter |= Q(
                 source=stock_date["source"],
                 date=stock_date["latest_date"],
             )
-        stocks = MarketStockSnapshot.objects.filter(stock_filter).order_by(
+        stock_queryset = MarketStockSnapshot.objects.filter(stock_filter)
+        stocks = stock_queryset.order_by(
             F("turnover").desc(nulls_last=True), "symbol"
         )[:60]
+        volume_by_symbol = {}
+        for stock in stock_queryset.filter(volume__isnull=False).order_by(
+            "symbol",
+            "-date",
+            Case(
+                When(source="nepsealpha", then=Value(0)),
+                When(source="sharesansar", then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            ),
+            "-updated_at",
+        ):
+            volume_by_symbol.setdefault(
+                stock.symbol,
+                {"symbol": stock.symbol, "volume": stock.volume},
+            )
+        top_volume = sorted(
+            volume_by_symbol.values(),
+            key=lambda row: row["volume"],
+            reverse=True,
+        )[:10]
         snapshot = (
             MarketSnapshot.objects.filter(
                 source__in=["nepsealpha", "sharesansar"],
                 index_value__isnull=False,
+                date__lte=end_date,
             )
             .order_by(
                 "-date",
@@ -184,6 +251,7 @@ class MarketAnalysisOverviewView(APIView):
                 if history
                 else None
             ),
+            **_market_history_metrics(history),
         }
         if snapshot is None:
             return Response(
@@ -204,6 +272,7 @@ class MarketAnalysisOverviewView(APIView):
                     "stocks": MarketStockSnapshotSerializer(
                         stocks, many=True
                     ).data,
+                    "top_volume": top_volume,
                 }
             )
 
@@ -241,6 +310,7 @@ class MarketAnalysisOverviewView(APIView):
                 "sectors": MarketIndexSnapshotSerializer(sectors, many=True).data,
                 "indices": MarketIndexSnapshotSerializer(indices, many=True).data,
                 "stocks": MarketStockSnapshotSerializer(stocks, many=True).data,
+                "top_volume": top_volume,
             }
         )
 

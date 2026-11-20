@@ -144,7 +144,7 @@ def collect_sharesansar_company_history_data():
 @shared_task
 def sync_sharesansar_company_directory():
     try:
-        result = sync_company_directory(target=10)
+        result = sync_company_directory()
     except (httpx.HTTPError, MarketDataProviderError):
         logger.exception("ShareSansar company-directory sync failed")
         raise

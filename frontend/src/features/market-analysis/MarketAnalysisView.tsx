@@ -8,6 +8,8 @@ import {
   ApiMarketAnalysis,
   ApiMarketHistoryRange,
   ApiMarketStock,
+  ApiStockPrice,
+  fetchCompanyPrices,
   fetchMarketAnalysis,
   fetchCompanies,
   fetchCompanyBehaviorSummary,
@@ -24,6 +26,8 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -45,8 +49,13 @@ export const MarketAnalysisView: React.FC = () => {
   const companies = companiesQuery.data?.results ?? [];
   const selectedCompany = companies.find((company) => company.id === companyId);
   const analysisQuery = useQuery({
-    queryKey: ['company-behavior', companyId, '30d'],
-    queryFn: () => fetchCompanyBehaviorSummary(companyId!),
+    queryKey: ['company-behavior', companyId, historyRange],
+    queryFn: () => fetchCompanyBehaviorSummary(companyId!, historyRange),
+    enabled: companyId !== null,
+  });
+  const companyPricesQuery = useQuery({
+    queryKey: ['company-prices', companyId, historyRange],
+    queryFn: () => fetchCompanyPrices(companyId!, historyRange),
     enabled: companyId !== null,
   });
   const analysis = analysisQuery.data;
@@ -128,6 +137,20 @@ export const MarketAnalysisView: React.FC = () => {
         <p role="alert" className="text-sm text-rose-600">
           {analysisQuery.error.message}
         </p>
+      )}
+      {companyPricesQuery.isLoading && companyId !== null && (
+        <LoadingState message="Loading recorded company prices…" />
+      )}
+      {companyPricesQuery.isError && (
+        <p role="alert" className="text-sm text-rose-600">
+          {companyPricesQuery.error.message}
+        </p>
+      )}
+      {companyId !== null && companyPricesQuery.data && (
+        <CompanyPriceHistory
+          symbol={selectedCompany?.symbol ?? 'Company'}
+          prices={companyPricesQuery.data}
+        />
       )}
       {analysis && (
         <div className="space-y-4">
@@ -220,8 +243,8 @@ function HistoricalIndexOnly({
   return (
     <ChartCard
       title="NEPSE historical performance"
-      subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`}`}
-      footer={`Available data: ${historyPeriod.available_from ?? 'Unavailable'} – ${historyPeriod.available_to ?? 'Unavailable'} · Last updated ${updatedAt} NPT`}
+      subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`} · Trend ${historyPeriod.trend ?? 'unavailable'}`}
+      footer={`Available data: ${historyPeriod.available_from ?? 'Unavailable'} – ${historyPeriod.available_to ?? 'Unavailable'} · Daily volatility ${historyPeriod.daily_volatility_percent === null ? 'unavailable' : `${historyPeriod.daily_volatility_percent}%`} · Last updated ${updatedAt} NPT`}
       actions={
         <label className="flex items-center gap-2 text-xs text-slate-500">
           History
@@ -423,8 +446,8 @@ function NepseMarketOverview({
 
       <ChartCard
         title="NEPSE historical performance"
-        subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`}`}
-        footer={`Available data: ${availableRange} · Last updated ${historyUpdatedAt} NPT`}
+        subtitle={`${historyPeriod.from ?? 'Unavailable'} – ${historyPeriod.to ?? 'Unavailable'} · Change ${historyPeriod.change_percent === null ? 'unavailable' : `${historyPeriod.change_percent}%`} · Trend ${historyPeriod.trend ?? 'unavailable'}`}
+        footer={`Available data: ${availableRange} · Daily volatility ${historyPeriod.daily_volatility_percent === null ? 'unavailable' : `${historyPeriod.daily_volatility_percent}%`} · Last updated ${historyUpdatedAt} NPT`}
       >
         {chartData.length ? (
           <div className="h-64 w-full min-w-0">
@@ -625,6 +648,12 @@ function NepseMarketOverview({
           valueKey="turnover_crore"
           valueLabel="Turnover (Cr)"
         />
+        <LeaderList
+          title="Highest traded volume"
+          leaders={data.top_volume}
+          valueKey="volume"
+          valueLabel="Shares"
+        />
       </div>
     </section>
   );
@@ -649,6 +678,7 @@ function MarketStockTable({ stocks }: { stocks: ApiMarketStock[] }) {
               <th className="p-2 text-right font-medium">High</th>
               <th className="p-2 text-right font-medium">Low</th>
               <th className="p-2 text-right font-medium">LTP</th>
+              <th className="p-2 text-right font-medium">Previous close</th>
               <th className="p-2 text-right font-medium">Change</th>
               <th className="p-2 text-right font-medium">Volume</th>
               <th className="p-2 text-right font-medium">Turnover (NPR)</th>
@@ -673,6 +703,9 @@ function MarketStockTable({ stocks }: { stocks: ApiMarketStock[] }) {
                 </td>
                 <td className="p-2 text-right font-mono">
                   {formatMarketNumber(stock.close_price)}
+                </td>
+                <td className="p-2 text-right font-mono">
+                  {formatMarketNumber(stock.previous_close)}
                 </td>
                 <td
                   className={`p-2 text-right font-mono ${
@@ -708,7 +741,7 @@ function LeaderList({
 }: {
   title: string;
   leaders: ApiMarketLeader[];
-  valueKey: 'change_percent' | 'turnover_crore';
+  valueKey: 'change_percent' | 'turnover_crore' | 'volume';
   valueLabel: string;
 }) {
   return (
@@ -744,6 +777,61 @@ function LeaderList({
         <p className="text-sm text-slate-500">Provider data is unavailable.</p>
       )}
     </section>
+  );
+}
+
+function CompanyPriceHistory({
+  symbol,
+  prices,
+}: {
+  symbol: string;
+  prices: ApiStockPrice[];
+}) {
+  const chartData = prices
+    .map((price) => ({ date: price.date, close: Number(price.close_price) }))
+    .filter((point) => Number.isFinite(point.close))
+    .sort((left, right) => left.date.localeCompare(right.date));
+
+  return (
+    <ChartCard title={`${symbol} historical closing price`}>
+      {chartData.length ? (
+        <div className="h-64 w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.45} />
+              <XAxis dataKey="date" minTickGap={36} tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <YAxis
+                domain={['auto', 'auto']}
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                tickFormatter={(value: number) => formatMarketNumber(String(value))}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#111827',
+                  borderColor: '#334155',
+                  color: '#e2e8f0',
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="close"
+                name={`${symbol} close`}
+                stroke="#38bdf8"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <EmptyState
+          title="Company price history is unavailable"
+          description="No collected OHLCV rows exist for this company and date range."
+          className="max-w-none"
+        />
+      )}
+    </ChartCard>
   );
 }
 

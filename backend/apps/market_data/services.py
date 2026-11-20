@@ -70,6 +70,8 @@ def persist_company_prices(source, date, rows):
                 source=source,
                 change_amount=row.get("change_amount"),
                 change_percent=row.get("change_percent"),
+                previous_close=row.get("previous_close"),
+                turnover=row.get("turnover"),
                 **values,
             )
         )
@@ -90,7 +92,9 @@ def persist_company_prices(source, date, rows):
                 "close_price",
                 "change_amount",
                 "change_percent",
+                "previous_close",
                 "volume",
+                "turnover",
                 "source",
                 "updated_at",
             ],
@@ -143,6 +147,8 @@ def persist_company_price_history(company, source, rows):
                 source=source,
                 change_amount=row.get("change_amount"),
                 change_percent=row.get("change_percent"),
+                previous_close=row.get("previous_close"),
+                turnover=row.get("turnover"),
                 **values,
             )
         )
@@ -163,7 +169,9 @@ def persist_company_price_history(company, source, rows):
                 "close_price",
                 "change_amount",
                 "change_percent",
+                "previous_close",
                 "volume",
+                "turnover",
                 "source",
                 "updated_at",
             ],
@@ -226,6 +234,8 @@ def backfill_company_prices(company):
                 source=snapshot.source,
                 change_amount=snapshot.change_amount,
                 change_percent=snapshot.change_percent,
+                previous_close=snapshot.previous_close,
+                turnover=snapshot.turnover,
                 **values,
             )
         )
@@ -246,7 +256,9 @@ def backfill_company_prices(company):
                 "close_price",
                 "change_amount",
                 "change_percent",
+                "previous_close",
                 "volume",
+                "turnover",
                 "source",
                 "updated_at",
             ],

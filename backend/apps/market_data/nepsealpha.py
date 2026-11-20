@@ -33,7 +33,11 @@ def collect_market_data():
         "User-Agent": getattr(settings, "CRAWLER_USER_AGENT", "NEPSEInsight/1.0"),
         "Accept": "application/json",
     }
-    with httpx.Client(timeout=REQUEST_TIMEOUT, headers=headers) as client:
+    with httpx.Client(
+        timeout=REQUEST_TIMEOUT,
+        headers=headers,
+        transport=httpx.HTTPTransport(retries=2),
+    ) as client:
         live_payload = _get_json(
             client,
             LIVE_URL,
@@ -113,7 +117,9 @@ def _parse_live_payload(payload):
             "high": _decimal(_column(columns, "high", index)),
             "low": _decimal(_column(columns, "low", index)),
             "close": _decimal(_column(columns, "close", index)),
+            "change_amount": _decimal(_column(columns, "change_amount", index)),
             "change_percent": _decimal(_column(columns, "percent_change", index)),
+            "previous_close": _decimal(_column(columns, "previous_close", index)),
             "turnover": _decimal(_column(columns, "turn_over", index)),
             "volume": _decimal(_column(columns, "volume", index)),
         }
@@ -478,6 +484,7 @@ def _save_snapshot(data):
                 low_price=row["low"],
                 close_price=row["close"],
                 change_amount=row.get("change_amount"),
+                previous_close=row.get("previous_close"),
                 change_percent=row["change_percent"],
                 turnover=row["turnover"],
                 volume=row["volume"],
@@ -496,9 +503,11 @@ def _save_snapshot(data):
                     "low_price",
                     "close_price",
                     "change_amount",
+                    "previous_close",
                     "change_percent",
                     "turnover",
                     "volume",
+                    "updated_at",
                 ],
             )
         from .services import persist_company_prices
