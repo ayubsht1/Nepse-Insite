@@ -157,7 +157,11 @@ To run a job manually, open **Actions → NEPSE data jobs → Run workflow** and
 choose `market-data`, `company-history`, `index-history`, `company-directory`,
 or `news`. For news, optionally enter comma-separated enabled source keys such
 as `sharesansar`; blank selects enabled sources. The Django admin crawl button
-uses the same workflow automatically.
+uses the same workflow automatically. Scheduled news runs do not pass database
+IDs: the command reuses queued `CrawlRun` records and creates runs for enabled
+sources that do not already have a queued run. The optional `crawl_run_ids`
+input is only for explicit runs (such as admin-dispatched runs); deleted or
+unknown IDs are rejected with an error naming the missing IDs.
 
 The optional `run_legacy_queue_worker` input is only for explicitly processing
 old Celery messages. It requires a `CELERY_BROKER_URL` Actions secret reachable

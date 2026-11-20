@@ -56,6 +56,66 @@ class RunCollectionCommandTests(TestCase):
         run = CrawlRun.objects.get(source=source)
         run_direct.assert_called_once_with(source.pk, run.pk)
 
+    @patch("apps.crawlers.management.commands.run_collection.run_crawl_source_direct")
+    def test_scheduled_news_creates_runs_when_no_runs_exist(self, run_direct):
+        source = CrawlSource.objects.create(
+            name="Scheduled source",
+            key="scheduled-source",
+            base_url="https://scheduled.example.test",
+            listing_url="https://scheduled.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+
+        call_command("run_collection", "news")
+
+        run = CrawlRun.objects.get(source=source)
+        self.assertEqual(run.status, CrawlRun.Status.QUEUED)
+        run_direct.assert_called_once_with(source.pk, run.pk)
+
+    @patch("apps.crawlers.management.commands.run_collection.run_crawl_source_direct")
+    def test_scheduled_news_reuses_queued_runs_and_creates_runs_for_other_sources(
+        self, run_direct
+    ):
+        queued_source = CrawlSource.objects.create(
+            name="Queued source",
+            key="queued-source",
+            base_url="https://queued.example.test",
+            listing_url="https://queued.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+        completed_source = CrawlSource.objects.create(
+            name="Completed source",
+            key="completed-source",
+            base_url="https://completed.example.test",
+            listing_url="https://completed.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+        queued_run = CrawlRun.objects.create(source=queued_source)
+        CrawlRun.objects.create(
+            source=completed_source,
+            status=CrawlRun.Status.SUCCEEDED,
+        )
+
+        call_command("run_collection", "news")
+
+        runs = list(CrawlRun.objects.order_by("pk"))
+        self.assertEqual(len(runs), 3)
+        created_run = CrawlRun.objects.get(source=completed_source, status="queued")
+        self.assertEqual(
+            {call.args for call in run_direct.call_args_list},
+            {
+                (queued_source.pk, queued_run.pk),
+                (completed_source.pk, created_run.pk),
+            },
+        )
+
+    def test_explicit_run_ids_report_missing_ids_clearly(self):
+        with self.assertRaisesRegex(CommandError, r"CrawlRun ID\(s\) do not exist: 9, 10"):
+            call_command("run_collection", "news", run_ids="9,10")
+
     def test_news_rejects_disabled_or_unknown_sources_without_creating_runs(self):
         disabled = CrawlSource.objects.create(
             name="Disabled direct source",
