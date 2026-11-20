@@ -264,6 +264,10 @@ CELERY_BEAT_SCHEDULE = {
 CRAWLER_USER_AGENT = os.getenv(
     "CRAWLER_USER_AGENT", "NEPSEInsightBot/1.0 (+contact: configure CRAWLER_USER_AGENT)"
 )
+GITHUB_ACTIONS_TOKEN = os.getenv("GITHUB_ACTIONS_TOKEN", "")
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "")
+GITHUB_WORKFLOW_FILE = os.getenv("GITHUB_WORKFLOW_FILE", "data-jobs.yml")
+GITHUB_ACTIONS_REF = os.getenv("GITHUB_ACTIONS_REF", "main")
 
 LOGGING = {
     "version": 1,

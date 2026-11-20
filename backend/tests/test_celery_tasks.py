@@ -8,7 +8,11 @@ from django.test import TestCase
 from config.celery import app as celery_app
 from apps.crawlers.models import CrawlRun, CrawlSource
 from apps.crawlers.services import NoArticlesDiscovered
-from apps.crawlers.tasks import crawl_enabled_sources, crawl_source
+from apps.crawlers.tasks import (
+    crawl_enabled_sources,
+    crawl_source,
+    run_crawl_source_direct,
+)
 
 
 class CrawlerTaskTests(TestCase):
@@ -96,6 +100,45 @@ class CrawlerTaskTests(TestCase):
         self.assertEqual(run.articles_created, 1)
         self.assertEqual(run.articles_duplicates, 1)
         self.assertEqual(result["status"], CrawlRun.Status.SUCCEEDED)
+
+    @patch("apps.crawlers.tasks.execute_crawl")
+    def test_direct_crawl_retries_without_publishing_to_the_broker(self, execute_crawl):
+        source = CrawlSource.objects.create(
+            name="Direct retry",
+            key="direct-retry",
+            base_url="https://direct-retry.example.test",
+            listing_url="https://direct-retry.example.test/news",
+            article_url_pattern=r"/article/",
+            enabled=True,
+        )
+        run = CrawlRun.objects.create(source=source)
+        execute_crawl.side_effect = [
+            httpx.TimeoutException("temporary timeout"),
+            {"requests_made": 1},
+        ]
+        with patch("apps.crawlers.tasks.time.sleep") as sleep:
+            with (
+                patch.object(
+                    crawl_source,
+                    "apply_async",
+                    side_effect=AssertionError("direct crawl must not be queued"),
+                ),
+                patch.object(
+                    crawl_source,
+                    "delay",
+                    side_effect=AssertionError("direct crawl must not be queued"),
+                ),
+            ):
+                result = run_crawl_source_direct(
+                    source.pk,
+                    run.pk,
+                    sleep=sleep,
+                )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, CrawlRun.Status.SUCCEEDED)
+        self.assertEqual(result["status"], CrawlRun.Status.SUCCEEDED)
+        sleep.assert_called_once_with(crawl_source.default_retry_delay)
 
     @patch("apps.crawlers.tasks.execute_crawl", side_effect=NoArticlesDiscovered(
         "No article URLs matched the configured pattern."

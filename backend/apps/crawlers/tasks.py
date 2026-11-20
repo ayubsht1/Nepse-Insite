@@ -1,4 +1,5 @@
 import logging
+import time
 
 import httpx
 from celery import shared_task
@@ -12,6 +13,7 @@ from .models import CrawlRun, CrawlSource
 from .services import RobotsDenied, crawl_source as execute_crawl
 
 logger = logging.getLogger(__name__)
+DIRECT_CRAWL_RETRIES = 3
 
 
 def _publish_run(run):
@@ -135,6 +137,8 @@ def crawl_source(self, source_id, run_id=None):
         run.refresh_from_db()
         run.error_message = str(exc)[:4000]
         run.save(update_fields=["error_message"])
+        if self.request.is_eager:
+            raise
         if self.request.retries >= self.max_retries:
             _mark_failed(run, exc)
             raise
@@ -145,6 +149,34 @@ def crawl_source(self, source_id, run_id=None):
         raise
     finally:
         client.close()
+
+
+def run_crawl_source_direct(source_id, run_id, sleep=time.sleep):
+    run = CrawlRun.objects.get(pk=run_id)
+    for attempt in range(DIRECT_CRAWL_RETRIES + 1):
+        try:
+            return crawl_source.apply(
+                args=(source_id, run_id),
+                throw=True,
+            ).get()
+        except httpx.HTTPError as exc:
+            is_permanent_client_error = (
+                isinstance(exc, httpx.HTTPStatusError)
+                and 400 <= exc.response.status_code < 500
+                and exc.response.status_code != 429
+            )
+            if is_permanent_client_error or attempt == DIRECT_CRAWL_RETRIES:
+                _mark_failed(run, exc)
+                raise
+            delay = crawl_source.default_retry_delay * (attempt + 1)
+            logger.warning(
+                "Retrying direct crawl run %s in %s seconds (attempt %s/%s)",
+                run_id,
+                delay,
+                attempt + 1,
+                DIRECT_CRAWL_RETRIES,
+            )
+            sleep(delay)
 
 
 @shared_task(name="apps.crawlers.tasks.crawl_enabled_sources")

@@ -1,14 +1,15 @@
 import logging
 
+from django.utils import timezone
 from rest_framework import serializers, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.events import broadcast_on_commit
 from common.permissions import IsAdminRole
+from .github_actions import WorkflowDispatchError, dispatch_crawl_workflow
 from .models import CrawlRun, CrawlSource
 from .serializers import CrawlRunSerializer, CrawlSourceSerializer
-from .tasks import crawl_source
 
 logger = logging.getLogger(__name__)
 
@@ -63,40 +64,51 @@ class StartCrawlView(APIView):
                 {"source_ids": "No enabled crawl sources are configured."}
             )
 
-        runs = []
-        enqueue_errors = []
-        for source in sources:
-            run = CrawlRun.objects.create(
+        runs = [
+            CrawlRun.objects.create(
                 source=source,
                 triggered_by=request.user,
                 status=CrawlRun.Status.QUEUED,
             )
+            for source in sources
+        ]
+        for run in runs:
             broadcast_on_commit(
                 "crawl.run.updated",
-                {"run_id": run.pk, "source": source.key, "status": run.status},
+                {
+                    "run_id": run.pk,
+                    "source": run.source.key,
+                    "status": run.status,
+                },
             )
-            try:
-                task_result = crawl_source.delay(source.pk, run.pk)
-                run.task_id = task_result.id
-                run.save(update_fields=["task_id"])
-                runs.append(run)
-            except Exception as exc:
-                logger.exception("Could not enqueue crawl run %s", run.pk)
-                run.status = CrawlRun.Status.FAILED
-                run.error_message = f"Could not enqueue crawl: {exc}"[:4000]
-                run.save(update_fields=["status", "error_message"])
-                enqueue_errors.append(run)
 
-        payload = CrawlRunSerializer(runs + enqueue_errors, many=True).data
-        if enqueue_errors:
+        try:
+            dispatch_crawl_workflow([run.pk for run in runs])
+        except WorkflowDispatchError as exc:
+            logger.warning("Could not dispatch crawl workflow: %s", exc)
+            for run in runs:
+                run.status = CrawlRun.Status.FAILED
+                run.error_message = str(exc)[:4000]
+                run.finished_at = timezone.now()
+                run.save(
+                    update_fields=["status", "error_message", "finished_at"]
+                )
+                broadcast_on_commit(
+                    "crawl.run.updated",
+                    {
+                        "run_id": run.pk,
+                        "source": run.source.key,
+                        "status": run.status,
+                    },
+                )
             return Response(
                 {
-                    "runs": payload,
-                    "error": "Some crawl tasks could not be queued; see each run's error_message.",
+                    "runs": CrawlRunSerializer(runs, many=True).data,
+                    "error": str(exc),
                 },
                 status=503,
             )
-        return Response({"runs": payload}, status=202)
+        return Response({"runs": CrawlRunSerializer(runs, many=True).data}, status=202)
 
     def paginate_queryset(self, queryset):
         from rest_framework.pagination import PageNumberPagination
