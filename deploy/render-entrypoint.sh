@@ -46,6 +46,28 @@ echo "Checking Nginx configuration..."
 
 nginx -t
 
+echo "Preparing Nginx runtime paths for app..."
+
+mkdir -p \
+    /var/lib/nginx \
+    /var/cache/nginx \
+    /tmp/nginx_client_temp \
+    /tmp/nginx_proxy_temp \
+    /tmp/nginx_fastcgi_temp \
+    /tmp/nginx_uwsgi_temp \
+    /tmp/nginx_scgi_temp
+
+chown -R app:app \
+    /var/lib/nginx \
+    /var/cache/nginx \
+    /tmp/nginx_client_temp \
+    /tmp/nginx_proxy_temp \
+    /tmp/nginx_fastcgi_temp \
+    /tmp/nginx_uwsgi_temp \
+    /tmp/nginx_scgi_temp
+
+rm -f /var/lib/nginx/nginx.pid
+
 echo "Checking generated Nginx listen port..."
 grep -n "listen" /etc/nginx/nginx.conf
 
