@@ -146,41 +146,6 @@ def main():
                 "/etc/supervisor/supervisord.conf",
             ],
         ),
-        (
-            "celery-worker-1",
-            [
-                "/usr/local/bin/celery",
-                "-A",
-                "config",
-                "worker",
-                "--loglevel=info",
-                "--concurrency=2",
-                "--hostname=worker1@%h",
-            ],
-        ),
-        (
-            "celery-worker-2",
-            [
-                "/usr/local/bin/celery",
-                "-A",
-                "config",
-                "worker",
-                "--loglevel=info",
-                "--concurrency=2",
-                "--hostname=worker2@%h",
-            ],
-        ),
-        (
-            "celery-beat",
-            [
-                "/usr/local/bin/celery",
-                "-A",
-                "config",
-                "beat",
-                "--loglevel=info",
-                "--schedule=/var/lib/celerybeat/celerybeat-schedule",
-            ],
-        ),
     ]
 
     exit_code = 0

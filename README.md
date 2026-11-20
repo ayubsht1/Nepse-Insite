@@ -140,15 +140,19 @@ if the application stores uploads locally, attach a persistent Render Disk at a
 path and set `MEDIA_ROOT` to that mount path. Otherwise configure external
 object storage for uploads.
 
-Create separate Render **Background Worker** services from the `backend/`
-directory using `backend/Dockerfile` and the same Django, Supabase, and Redis
-environment values, including `DJANGO_SETTINGS_MODULE=config.settings.production`.
-Set one worker's Docker Command to
-`celery -A config worker --loglevel=info --concurrency=2`. Create exactly one
-additional worker for Beat with Docker Command
-`celery -A config beat --loglevel=info`. Do not run multiple Beat instances.
-These services keep scheduled market-data collection and crawling outside the
-Web Service while using the existing Celery configuration and schedules.
+Create one Render **Background Worker** service from the `backend/` directory
+using `backend/Dockerfile`. Give it the same Django, Supabase, and Redis
+environment values as the Web Service, including
+`DJANGO_SETTINGS_MODULE=config.settings.production`; set its Docker Command to
+`celery -A config worker --loglevel=info --concurrency=1`.
+
+Create one additional Background Worker service for Beat using the same image
+and environment values, with Docker Command
+`celery -A config beat --loglevel=info --schedule=/var/lib/celerybeat/celerybeat-schedule`.
+Do not run multiple Beat instances. These services keep scheduled market-data
+collection and crawling outside the 512 MiB Web Service while preserving the
+existing Celery tasks and schedules. There is no `render.yaml`; configure
+these two Background Worker services in Render with the commands above.
 
 Dashboard pages require authentication. Public registration is at `/register`
 and always grants Viewer. Protected routes are `/dashboard`, `/analyst`, and

@@ -33,6 +33,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DJANGO_SETTINGS_MODULE=config.settings.production \
     NODE_ENV=production \
+    NODE_OPTIONS=--max-old-space-size=256 \
     NEXT_TELEMETRY_DISABLED=1 \
     STATIC_ROOT=/srv/static \
     MEDIA_ROOT=/srv/media
