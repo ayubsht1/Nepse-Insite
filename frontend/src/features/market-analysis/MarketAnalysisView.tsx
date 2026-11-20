@@ -403,7 +403,7 @@ function NepseMarketOverview({
             </select>
           </label>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {marketStatus} · Updated {updatedAt} NPT
+            {marketStatus} · Data {data.freshness.status} · Updated {updatedAt} NPT
           </p>
         </div>
       </div>

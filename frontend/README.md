@@ -21,6 +21,12 @@ npm.cmd run dev
 
 Open <http://localhost:3000>.
 
+The Market Analysis page uses the authenticated Django
+`/api/market-data/analysis/` endpoint. It displays collected NEPSE index and
+sector history, daily market summaries, company quotes, and freshness where
+those records are available. Empty source data is shown as unavailable; the
+frontend does not supply or estimate market prices.
+
 ## Production
 
 ```powershell

@@ -101,7 +101,7 @@ class CrawlSourceSerializer(serializers.ModelSerializer):
 
 
 class CrawlRunSerializer(serializers.ModelSerializer):
-    source_name = serializers.CharField(source="source.name", read_only=True)
+    source_name = serializers.SerializerMethodField()
     triggered_by = serializers.CharField(
         source="triggered_by.username", read_only=True, allow_null=True
     )
@@ -112,6 +112,8 @@ class CrawlRunSerializer(serializers.ModelSerializer):
             "id",
             "source",
             "source_name",
+            "collection_type",
+            "collection_source",
             "triggered_by",
             "status",
             "task_id",
@@ -120,7 +122,15 @@ class CrawlRunSerializer(serializers.ModelSerializer):
             "requests_made",
             "articles_created",
             "articles_duplicates",
+            "records_created",
+            "records_updated",
+            "records_processed",
             "error_message",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_source_name(self, obj):
+        if obj.source_id:
+            return obj.source.name
+        return obj.collection_source or None

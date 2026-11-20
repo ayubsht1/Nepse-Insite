@@ -32,7 +32,17 @@ def _mark_failed(run, error):
     run.status = CrawlRun.Status.FAILED
     run.error_message = str(error)[:4000]
     run.finished_at = timezone.now()
-    run.save(update_fields=["status", "error_message", "finished_at"])
+    run.records_created = run.articles_created
+    run.records_processed = run.articles_created + run.articles_duplicates
+    run.save(
+        update_fields=[
+            "status",
+            "error_message",
+            "finished_at",
+            "records_created",
+            "records_processed",
+        ]
+    )
     _publish_run(run)
 
 
@@ -92,10 +102,14 @@ def crawl_source(self, source_id, run_id=None):
             run.refresh_from_db()
             run.status = CrawlRun.Status.SUCCEEDED
             run.finished_at = timezone.now()
+            run.records_created = run.articles_created
+            run.records_processed = run.articles_created + run.articles_duplicates
             run.save(
                 update_fields=[
                     "status",
                     "finished_at",
+                    "records_created",
+                    "records_processed",
                 ]
             )
             _publish_run(run)
@@ -118,8 +132,16 @@ def crawl_source(self, source_id, run_id=None):
         run.status = CrawlRun.Status.PARTIAL
         run.error_message = str(exc)
         run.finished_at = timezone.now()
+        run.records_created = run.articles_created
+        run.records_processed = run.articles_created + run.articles_duplicates
         run.save(
-            update_fields=["status", "error_message", "finished_at"]
+            update_fields=[
+                "status",
+                "error_message",
+                "finished_at",
+                "records_created",
+                "records_processed",
+            ]
         )
         _publish_run(run)
         logger.warning("Crawl run %s skipped by robots.txt: %s", run.pk, exc)

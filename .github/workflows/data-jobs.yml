@@ -2,11 +2,11 @@ name: NEPSE data jobs
 
 on:
   schedule:
-    - cron: "*/15 5-9 * * 0-4"
+    - cron: "15,30,45 5 * * 0-4"
+    - cron: "*/15 6-8 * * 0-4"
+    - cron: "0,15 9 * * 0-4"
     - cron: "0 */4 * * *"
     - cron: "20 9 * * 0-4"
-    - cron: "30 9 * * 0-4"
-    - cron: "0 10 * * 0-4"
   workflow_dispatch:
     inputs:
       operation:
@@ -15,13 +15,22 @@ on:
         required: true
         default: news
         options:
+          - all
+          - live_market
+          - historical_market
+          - market_analysis
+          - news
           - market-data
           - company-history
           - index-history
           - company-directory
-          - news
       source_keys:
-        description: Comma-separated enabled crawler keys; blank means all enabled
+        description: Comma-separated enabled news crawler keys; blank means all enabled
+        type: string
+        required: false
+        default: ""
+      market_source_keys:
+        description: Comma-separated market provider keys; blank means all providers
         type: string
         required: false
         default: ""
@@ -55,14 +64,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: nepse-data-collection-${{ github.ref }}
+  group: nepse-data-collection-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   collect:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -82,18 +91,18 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt
       - name: Validate job settings
-        run: python manage.py check
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
       - name: Run scheduled collection
         if: github.event_name == 'schedule'
         env:
           EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           case "$EVENT_SCHEDULE" in
-            "*/15 5-9 * * 0-4") operation="market-data" ;;
+            "15,30,45 5 * * 0-4"|"*/15 6-8 * * 0-4"|"0,15 9 * * 0-4") operation="live_market" ;;
             "0 */4 * * *") operation="news" ;;
-            "20 9 * * 0-4") operation="company-directory" ;;
-            "30 9 * * 0-4") operation="index-history" ;;
-            "0 10 * * 0-4") operation="company-history" ;;
+            "20 9 * * 0-4") operation="historical_market" ;;
             *) echo "::error::Unrecognized schedule: $EVENT_SCHEDULE"; exit 1 ;;
           esac
           python manage.py run_collection "$operation"
@@ -102,9 +111,16 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           SOURCE_KEYS: ${{ inputs.source_keys }}
+          MARKET_SOURCE_KEYS: ${{ inputs.market_source_keys }}
           CRAWL_RUN_IDS: ${{ inputs.crawl_run_ids }}
         run: |
-          args=(python manage.py run_collection "$OPERATION" --source-keys "$SOURCE_KEYS")
+          args=(python manage.py run_collection "$OPERATION")
+          if [[ -n "${SOURCE_KEYS//[[:space:]]/}" ]]; then
+            args+=(--source-keys "$SOURCE_KEYS")
+          fi
+          if [[ -n "${MARKET_SOURCE_KEYS//[[:space:]]/}" ]]; then
+            args+=(--market-source-keys "$MARKET_SOURCE_KEYS")
+          fi
           if [[ -n "${CRAWL_RUN_IDS//[[:space:]]/}" ]]; then
             args+=(--run-ids "$CRAWL_RUN_IDS")
           fi

@@ -31,12 +31,19 @@ class CrawlSource(models.Model):
 
 
 class CrawlRun(models.Model):
+    class CollectionType(models.TextChoices):
+        NEWS = "news", "News"
+        LIVE_MARKET = "live_market", "Live market"
+        HISTORICAL_MARKET = "historical_market", "Historical market"
+        MARKET_ANALYSIS = "market_analysis", "Market analysis"
+
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
         RUNNING = "running", "Running"
         SUCCEEDED = "succeeded", "Succeeded"
         PARTIAL = "partial", "Partial"
         FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
 
     source = models.ForeignKey(
         CrawlSource,
@@ -55,12 +62,22 @@ class CrawlRun(models.Model):
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.QUEUED, db_index=True
     )
+    collection_type = models.CharField(
+        max_length=32,
+        choices=CollectionType.choices,
+        default=CollectionType.NEWS,
+        db_index=True,
+    )
+    collection_source = models.CharField(max_length=128, blank=True)
     task_id = models.CharField(max_length=255, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     requests_made = models.PositiveIntegerField(default=0)
     articles_created = models.PositiveIntegerField(default=0)
     articles_duplicates = models.PositiveIntegerField(default=0)
+    records_created = models.PositiveIntegerField(default=0)
+    records_updated = models.PositiveIntegerField(default=0)
+    records_processed = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

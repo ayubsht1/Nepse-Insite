@@ -589,6 +589,7 @@ class MarketOverviewApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["snapshot"]["index_value"], "2700.0000")
+        self.assertEqual(response.data["freshness"]["status"], "fresh")
         self.assertEqual(len(response.data["history"]), 1)
         self.assertEqual(response.data["history_period"]["requested_range"], "7d")
         self.assertEqual(
@@ -662,6 +663,18 @@ class MarketOverviewApiTests(APITestCase):
             {stock["source"] for stock in response.data["stocks"]},
             {"nepsealpha", "sharesansar", "merolagani"},
         )
+        self.assertEqual(response.data["freshness"]["status"], "fresh")
+
+    def test_analysis_endpoint_marks_old_market_records_stale(self):
+        stale_at = timezone.now() - timedelta(hours=25)
+        MarketSnapshot.objects.update(updated_at=stale_at)
+        MarketIndexSnapshot.objects.update(updated_at=stale_at)
+        MarketStockSnapshot.objects.update(updated_at=stale_at)
+
+        response = self.client.get("/api/market-data/analysis/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["freshness"]["status"], "stale")
 
 
 class CompanyPriceCollectionApiTests(APITestCase):

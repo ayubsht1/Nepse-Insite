@@ -99,6 +99,9 @@ class CrawlerTaskTests(TestCase):
         self.assertEqual(run.requests_made, 1)
         self.assertEqual(run.articles_created, 1)
         self.assertEqual(run.articles_duplicates, 1)
+        self.assertEqual(run.records_created, 1)
+        self.assertEqual(run.records_updated, 0)
+        self.assertEqual(run.records_processed, 2)
         self.assertEqual(result["status"], CrawlRun.Status.SUCCEEDED)
 
     @patch("apps.crawlers.tasks.execute_crawl")
@@ -159,6 +162,8 @@ class CrawlerTaskTests(TestCase):
 
         run.refresh_from_db()
         self.assertEqual(run.status, CrawlRun.Status.FAILED)
+        self.assertEqual(run.records_created, 0)
+        self.assertEqual(run.records_processed, 0)
         self.assertIn("No article URLs matched", run.error_message)
         self.assertIsNotNone(run.finished_at)
 
