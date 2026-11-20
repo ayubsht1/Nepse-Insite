@@ -57,7 +57,10 @@ RUN apt-get update \
        /var/lib/nginx \
        /tmp/nginx_client_temp \
        /tmp/nginx_proxy_temp \
-    && touch /tmp/nginx-access.log /tmp/nginx-error.log \
+       /tmp/nginx_fastcgi_temp \
+       /tmp/nginx_uwsgi_temp \
+       /tmp/nginx_scgi_temp \
+    && chmod 1777 /tmp \
     && chown -R app:app \
        /srv/static \
        /srv/media \
@@ -66,8 +69,9 @@ RUN apt-get update \
        /var/lib/nginx \
        /tmp/nginx_client_temp \
        /tmp/nginx_proxy_temp \
-       /tmp/nginx-access.log \
-       /tmp/nginx-error.log
+       /tmp/nginx_fastcgi_temp \
+       /tmp/nginx_uwsgi_temp \
+       /tmp/nginx_scgi_temp
 
 COPY --from=backend-dependencies /opt/python/ /usr/local/
 
