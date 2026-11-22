@@ -1,0 +1,126 @@
+name: NEPSE data jobs
+
+on:
+  schedule:
+    - cron: "*/15 5-9 * * 0-4"
+    - cron: "0 */4 * * *"
+    - cron: "20 9 * * 0-4"
+    - cron: "30 9 * * 0-4"
+    - cron: "0 10 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Collection operation
+        type: choice
+        required: true
+        default: news
+        options:
+          - market-data
+          - company-history
+          - index-history
+          - company-directory
+          - news
+      source_keys:
+        description: Comma-separated enabled crawler keys; blank means all enabled
+        type: string
+        required: false
+        default: ""
+      crawl_run_ids:
+        description: Queued CrawlRun IDs dispatched by the admin API
+        type: string
+        required: false
+        default: ""
+      run_legacy_queue_worker:
+        description: Explicitly drain the app's default Celery queue
+        type: boolean
+        required: false
+        default: false
+      legacy_max_tasks:
+        description: Maximum legacy queue tasks to process (1-20)
+        type: number
+        required: false
+        default: 5
+      legacy_max_seconds:
+        description: Maximum legacy worker runtime in seconds (10-600)
+        type: number
+        required: false
+        default: 300
+      legacy_idle_seconds:
+        description: Stop the legacy worker after this many idle seconds (1-120)
+        type: number
+        required: false
+        default: 30
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nepse-data-collection-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.github_actions
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      CRAWLER_USER_AGENT: ${{ secrets.CRAWLER_USER_AGENT }}
+      CELERY_BROKER_URL: ${{ secrets.CELERY_BROKER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Validate job settings
+        run: python manage.py check
+      - name: Run scheduled collection
+        if: github.event_name == 'schedule'
+        env:
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          case "$EVENT_SCHEDULE" in
+            "*/15 5-9 * * 0-4") operation="market-data" ;;
+            "0 */4 * * *") operation="news" ;;
+            "20 9 * * 0-4") operation="company-directory" ;;
+            "30 9 * * 0-4") operation="index-history" ;;
+            "0 10 * * 0-4") operation="company-history" ;;
+            *) echo "::error::Unrecognized schedule: $EVENT_SCHEDULE"; exit 1 ;;
+          esac
+          python manage.py run_collection "$operation"
+      - name: Run manually selected collection
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          OPERATION: ${{ inputs.operation }}
+          SOURCE_KEYS: ${{ inputs.source_keys }}
+          CRAWL_RUN_IDS: ${{ inputs.crawl_run_ids }}
+        run: |
+          args=(python manage.py run_collection "$OPERATION" --source-keys "$SOURCE_KEYS")
+          if [[ -n "${CRAWL_RUN_IDS//[[:space:]]/}" ]]; then
+            args+=(--run-ids "$CRAWL_RUN_IDS")
+          fi
+          "${args[@]}"
+      - name: Process bounded legacy Celery queue
+        if: github.event_name == 'workflow_dispatch' && inputs.run_legacy_queue_worker
+        env:
+          MAX_TASKS: ${{ inputs.legacy_max_tasks }}
+          MAX_SECONDS: ${{ inputs.legacy_max_seconds }}
+          IDLE_SECONDS: ${{ inputs.legacy_idle_seconds }}
+        run: |
+          if [ -z "$CELERY_BROKER_URL" ]; then
+            echo "::error::Set the CELERY_BROKER_URL repository secret to use the legacy worker."
+            exit 1
+          fi
+          python manage.py run_bounded_celery_worker \
+            --max-tasks "$MAX_TASKS" \
+            --max-seconds "$MAX_SECONDS" \
+            --idle-seconds "$IDLE_SECONDS"
